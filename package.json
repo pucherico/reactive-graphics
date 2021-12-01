@@ -1,0 +1,33 @@
+{
+  "name": "reactive-graphics",
+  "version": "0.0.1",
+  "files": [
+    "dist",
+    "dist-types/**/*.d.ts"
+  ],
+  "main": "./dist/reactive-graphics.umd.js",
+  "module": "./dist/reactive-graphics.es.js",
+  "exports": {
+    ".": {
+      "import": "./dist/reactive-graphics.es.js",
+      "require": "./dist/reactive-graphics.umd.js"
+    }
+  },
+  "types": "dist-types/index.d.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --declaration --declarationDir dist-types --emitDeclarationOnly && vite build",
+    "serve": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^4.3.2",
+    "vite": "^2.6.4"
+  },
+  "dependencies": {
+    "rxjs": "^7.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pucherico/reactive-graphics.git"
+  }
+}
