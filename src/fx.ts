@@ -168,7 +168,7 @@ import { Observable, EMPTY, of, merge, concat,
         )),
       );
       this.pulse$ = this.delta$.pipe(
-        tap(({ delta, last: _ }) => engine.translateLayer(layer, delta)),
+        tap(({ delta, last: _ }) => engine.translateLayer(delta, layer)),
         share()
       );
     }
