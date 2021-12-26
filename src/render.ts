@@ -229,17 +229,32 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
     protected layers: L[];
     protected layerFrames: FrameManager[];
   
+    public fps$: Observable<number>; // count of frames per second rendered. This value is updated every second.
     public status: GraphStatus = new GraphStatus();
     private readonly frameManager: FrameManager;
     private readonly effect$: Subject<CanvasEffect> = new Subject();
     private effectSub: Subscription | null = null;
     private fpsSubject?: Subject<number>;
+    private pendingRenderRequests = 0;
   
     constructor(protected canvas: HTMLCanvasElement) {
       this.frameManager = new FrameManager();
       this.currentLayer = 0;
       this.layers = [this.newLayer()];
       this.layerFrames = [new FrameManager(this.frameManager.frame$)];
+      this.fpsSubject = new Subject<number>();
+      this.effectSub = this.effect$.pipe(
+        mergeMap(effect => effect.pulse().pipe(
+          takeUntil(this.status.removed$.pipe(
+            filter(graph => graph === effect.target)
+          ))
+        )),
+        auditTime(0, animationFrameScheduler), // throttleTime(0, animationFrame)
+      ).subscribe(() => {
+        this.renderPhase();
+        this.fpsSubject?.next(1);
+      });
+      this.fps$ = this.fpsSubject.asObservable().pipe(bufferTime(1000), map(group => group.length));
     }
   
     get frame$() {
@@ -287,30 +302,6 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
     }
   
     /**
-     * Set up effects engine.
-     * @returns an Observable with the count of frames per second rendered. This value is updated every second.
-     */
-    init(): Observable<number> {
-      this.fpsSubject = new Subject<number>();
-      this.effectSub = this.effect$.pipe(
-        mergeMap(effect => effect.pulse().pipe(
-          takeUntil(this.status.removed$.pipe(
-            filter(graph => graph === effect.target)
-          ))
-        )),
-        auditTime(0, animationFrameScheduler), // throttleTime(0, animationFrame)
-      ).subscribe(() => {
-        const context = this.canvas.getContext('2d');
-        if (context) {
-          this.clearCanvas(context);
-          this.renderObjects(context);
-          this.fpsSubject?.next(1);
-        }
-      });
-      return this.fpsSubject.asObservable().pipe(bufferTime(1000), map(group => group.length));
-    }
-  
-    /**
      * Release effect resources
      */
     destroy() {
@@ -354,23 +345,16 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
       this.effect$.next(effect);
     }
   
-    addGraphic(graph: Drawable, ...effects: EffectFactory<Drawable>[]) {
+    addGraphic(graph: Drawable, layer: number | null = null): GraphContext<Drawable> {
       // For robustness, we remove it first if graph already in engine
       if (this.layerMap.get(graph) !== undefined) {
         this.removeGraphic(graph);
       }
-      this.addGraphicInLayer(graph, this.currentLayer, ...effects);
-    }
-  
-    addGraphicInLayer(graph: Drawable, layer: number, ...effects: EffectFactory<Drawable>[]) {
-      // For robustness, we remove it first if graph already in engine
-      if (this.layerMap.get(graph) !== undefined) {
-        this.removeGraphic(graph);
-      }
-      const graphLayer = layer === null ? this.currentLayer : layer;
+      const graphLayer = layer ?? this.currentLayer;
       this.layers[graphLayer].addGraphic(graph);
       this.layerMap.set(graph, graphLayer);
-      effects.forEach(factory => this.playEffect(factory(graph)));
+      this.requestRender();
+      return new GraphContext(this, graph);
     }
   
     removeGraphic(graph: Drawable): number {
@@ -482,13 +466,21 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
     }
   
     public requestRender() {
-      requestAnimationFrame(() => {
-        const context = this.canvas.getContext('2d');
-        if (context !== null) {
-          this.clearCanvas(context);
-          this.renderObjects(context);
-        }
-      });
+      this.pendingRenderRequests++;
+      if (this.pendingRenderRequests === 1) {
+        requestAnimationFrame(() => {
+          this.renderPhase();
+          this.pendingRenderRequests = 0;
+        });
+      }
+    }
+
+    private renderPhase() {
+      const context = this.canvas.getContext('2d');
+      if (context !== null) {
+        this.clearCanvas(context);
+        this.renderObjects(context);
+      }
     }
   
     private clearCanvas(context: CanvasRenderingContext2D) {
@@ -502,6 +494,19 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
         .filter(({ enabled }) => enabled)
         .map(({ layer }) => layer)
         .forEach(layer => layer.renderObjects(context));
+    }
+  }
+
+  export class GraphContext<T extends Drawable> {
+
+    constructor(private renderManager: RenderManager, public graph: T) {}
+
+    public effect(factory: EffectFactory<T>) {
+      this.renderManager.playEffect(factory(this.graph));
+    }
+
+    public effects(...factories: EffectFactory<T>[]) {
+      factories.forEach(factory => this.effect(factory));
     }
   }
   
@@ -897,32 +902,19 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
       return new CollisionLayer();
     }
   
-    init(): Observable<number> {
-      return super.init();
-    }
-  
     public nextLayer(): number {
-      const layer = super.nextLayer();
-      // this.layersInput.push(this.currentLayerInput = new LayerInput(layer, this.basicInput, this));
-      return layer;
+      return super.nextLayer();
     }
-  
-    addObject(graph: GraphObject, ...effects: EffectFactory<Drawable>[]) {
+
+    addObject(graph: GraphObject, layer: number | null = null): GraphContext<Drawable> {
       // For robustness, we remove it first if graph already in engine
       if (this.layerMap.get(graph) !== undefined) {
         this.removeObject(graph);
       }
-      this.addObjectInLayer(graph, this.currentLayer, ...effects);
-    }
-  
-    addObjectInLayer(graph: GraphObject, layer: number, ...effects: EffectFactory<Drawable>[]) {
-      // For robustness, we remove it first if graph already in engine
-      if (this.layerMap.get(graph) !== undefined) {
-        this.removeObject(graph);
-      }
-      const graphLayer = layer === null ? this.currentLayer : layer;
-      super.addGraphicInLayer(graph, graphLayer, ...effects);
+      const graphLayer = layer ?? this.currentLayer;
+      const context = super.addGraphic(graph, graphLayer);
       this.layers[graphLayer].addObject(graph);
+      return context;
     }
   
     // redefinición para evitar que un cliente por error añada como objeto y elimine como gráfico
