@@ -380,7 +380,8 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
       this.layers[layer].sendToBack(graph);
     }
   
-    scaleLayer(sx: number, sy: number, layer: number) {
+    scaleLayer(sx: number, sy: number, layer: number | null = null) {
+      layer = layer ?? this.currentLayer;
       if (layer < 0 || layer >= this.layers.length) { throw Error(`Invalid layer ${layer}.`); }
       this.layers[layer].scale(sx, sy);
     }
@@ -389,7 +390,8 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
       layers.forEach(layer => this.scaleLayer(sx, sy, layer));
     }
   
-    rotateLayer(alpha: number, layer: number) {
+    rotateLayer(alpha: number, layer: number | null = null) {
+      layer = layer ?? this.currentLayer;
       if (layer < 0 || layer >= this.layers.length) { throw Error(`Invalid layer ${layer}.`); }
       this.layers[layer].rotate(alpha);
     }
@@ -398,7 +400,8 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
       layers.forEach(layer => this.rotateLayer(alpha, layer));
     }
   
-    translateLayer(point: Point, layer: number) {
+    translateLayer(point: Point, layer: number | null = null) {
+      layer = layer ?? this.currentLayer;
       if (layer < 0 || layer >= this.layers.length) { throw Error(`Invalid layer ${layer}.`); }
       this.layers[layer].translate(point);
     }
