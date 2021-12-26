@@ -344,8 +344,10 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
       if (this.effectSub === null) { throw new Error('Invalid state: You Can\'t add any effect before initialization.'); }
       this.effect$.next(effect);
     }
-  
-    addGraphic(graph: Drawable, layer: number | null = null): GraphContext<Drawable> {
+
+    addGraphic(graphOrDraw: Drawable | ((context: CanvasRenderingContext2D) => void),
+              layer: number | null = null): GraphContext<Drawable> {
+      const graph = typeof graphOrDraw === 'function' ? ({ draw: graphOrDraw }) : graphOrDraw;
       // For robustness, we remove it first if graph already in engine
       if (this.layerMap.get(graph) !== undefined) {
         this.removeGraphic(graph);
@@ -378,31 +380,34 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
       this.layers[layer].sendToBack(graph);
     }
   
-    scaleLayer(layer: number, sx: number, sy: number) {
+    scaleLayer(sx: number, sy: number, layer: number | null = null) {
+      layer = layer ?? this.currentLayer;
       if (layer < 0 || layer >= this.layers.length) { throw Error(`Invalid layer ${layer}.`); }
       this.layers[layer].scale(sx, sy);
     }
   
     scaleLayers(sx: number, sy: number, ...layers: number[]) {
-      layers.forEach(layer => this.scaleLayer(layer, sx, sy));
+      layers.forEach(layer => this.scaleLayer(sx, sy, layer));
     }
   
-    rotateLayer(layer: number, alpha: number) {
+    rotateLayer(alpha: number, layer: number | null = null) {
+      layer = layer ?? this.currentLayer;
       if (layer < 0 || layer >= this.layers.length) { throw Error(`Invalid layer ${layer}.`); }
       this.layers[layer].rotate(alpha);
     }
   
     rotateLayers(alpha: number, ...layers: number[]) {
-      layers.forEach(layer => this.rotateLayer(layer, alpha));
+      layers.forEach(layer => this.rotateLayer(alpha, layer));
     }
   
-    translateLayer(layer: number, point: Point) {
+    translateLayer(point: Point, layer: number | null = null) {
+      layer = layer ?? this.currentLayer;
       if (layer < 0 || layer >= this.layers.length) { throw Error(`Invalid layer ${layer}.`); }
       this.layers[layer].translate(point);
     }
   
     translateLayers(point: Point, ...layers: number[]) {
-      layers.forEach(layer => this.translateLayer(layer, point));
+      layers.forEach(layer => this.translateLayer(point, layer));
     }
   
     layerOfGraph(graph: Drawable): number {
