@@ -345,20 +345,12 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
       this.effect$.next(effect);
     }
   
-    addGraphic(graph: Drawable): GraphContext<Drawable> {
+    addGraphic(graph: Drawable, layer: number | null = null): GraphContext<Drawable> {
       // For robustness, we remove it first if graph already in engine
       if (this.layerMap.get(graph) !== undefined) {
         this.removeGraphic(graph);
       }
-      return this.addGraphicInLayer(graph, this.currentLayer);
-    }
-  
-    addGraphicInLayer(graph: Drawable, layer: number): GraphContext<Drawable> {
-      // For robustness, we remove it first if graph already in engine
-      if (this.layerMap.get(graph) !== undefined) {
-        this.removeGraphic(graph);
-      }
-      const graphLayer = layer === null ? this.currentLayer : layer;
+      const graphLayer = layer ?? this.currentLayer;
       this.layers[graphLayer].addGraphic(graph);
       this.layerMap.set(graph, graphLayer);
       this.requestRender();
@@ -911,26 +903,16 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
     }
   
     public nextLayer(): number {
-      const layer = super.nextLayer();
-      // this.layersInput.push(this.currentLayerInput = new LayerInput(layer, this.basicInput, this));
-      return layer;
+      return super.nextLayer();
     }
-  
-    addObject(graph: GraphObject): GraphContext<Drawable> {
+
+    addObject(graph: GraphObject, layer: number | null = null): GraphContext<Drawable> {
       // For robustness, we remove it first if graph already in engine
       if (this.layerMap.get(graph) !== undefined) {
         this.removeObject(graph);
       }
-      return this.addObjectInLayer(graph, this.currentLayer);
-    }
-  
-    addObjectInLayer(graph: GraphObject, layer: number): GraphContext<Drawable> {
-      // For robustness, we remove it first if graph already in engine
-      if (this.layerMap.get(graph) !== undefined) {
-        this.removeObject(graph);
-      }
-      const graphLayer = layer === null ? this.currentLayer : layer;
-      const context = super.addGraphicInLayer(graph, graphLayer);
+      const graphLayer = layer ?? this.currentLayer;
+      const context = super.addGraphic(graph, graphLayer);
       this.layers[graphLayer].addObject(graph);
       return context;
     }
