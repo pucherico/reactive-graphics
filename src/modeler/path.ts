@@ -36,19 +36,19 @@ export class PathBuilder {
   private constructor(
     private vertexes: Vertex[],
     private readonly closedPath: boolean,
-    private context: ModelerContext | null
+    private context?: ModelerContext
   ) {}
 
-  static newPath(context: ModelerContext | null = null): PathBuilder {
+  static newPath(context?: ModelerContext): PathBuilder {
     return new PathBuilder([], false, context);
   }
 
-  static newClosedPath(context: ModelerContext | null = null): PathBuilder {
+  static newClosedPath(context?: ModelerContext): PathBuilder {
     return new PathBuilder([], true, context);
   }
 
   static reversePath(source: PathBuilder): PathBuilder {
-    return new PathBuilder(source.vertexes.reverse(), source.closedPath, null);
+    return new PathBuilder(source.vertexes.reverse(), source.closedPath);
   }
 
   static symmetricPathHorizontal(source: PathBuilder, y = 0): PathBuilder {
@@ -56,7 +56,7 @@ export class PathBuilder {
       (vertex) =>
         new Vertex({ x: vertex.x, y: y - (vertex.y - y) }, vertex.isControl)
     );
-    return new PathBuilder(vertexes, source.closedPath, null);
+    return new PathBuilder(vertexes, source.closedPath);
   }
 
   static symmetricPathVertical(source: PathBuilder, x = 0): PathBuilder {
@@ -64,7 +64,7 @@ export class PathBuilder {
       (vertex) =>
         new Vertex({ x: x - (vertex.x - x), y: vertex.y }, vertex.isControl)
     );
-    return new PathBuilder(vertexes, source.closedPath, null);
+    return new PathBuilder(vertexes, source.closedPath);
   }
 
   static symmetricPath(source: PathBuilder): PathBuilder {
@@ -84,26 +84,56 @@ export class PathBuilder {
     return PathBuilder.transformPath(source, transform);
   }
 
+  static fitPathBetweenPoints(
+    source: PathBuilder,
+    first: Point,
+    last: Point
+  ): PathBuilder {
+    if (source.vertexes.length < 2) {
+      return source;
+    }
+    const dir = vector(first, last);
+    const modulus = Math.sqrt(dir.x * dir.x + dir.y * dir.y);
+    const pathFirst = source.firstPoint();
+    const pathLast = source.lastPoint();
+    const pathDir = vector(pathFirst, pathLast);
+    const pathMod = Math.sqrt(pathDir.x * pathDir.x + pathDir.y * pathDir.y);
+    const s = modulus / pathMod;
+    const transform = Identity.translate(first)
+      .rotate(PathBuilder.angle(pathDir, dir))
+      .scale(s, s)
+      .translate(vector(pathFirst, ORIGIN));
+    return PathBuilder.transformPath(source, transform);
+  }
+
   static transformPath(source: PathBuilder, transform: Matrix): PathBuilder {
     const vertexes = source.vertexes.map(
       (vertex) =>
         new Vertex(transform.transform(vertex.point), vertex.isControl)
     );
-    return new PathBuilder(vertexes, source.closedPath, null);
+    return new PathBuilder(vertexes, source.closedPath);
+  }
+
+  static mapVertexes(
+    source: PathBuilder,
+    transform: (vertex: Vertex) => Vertex
+  ) {
+    const vertexes = source.vertexes.map((vertex) => transform(vertex));
+    return new PathBuilder(vertexes, source.closedPath);
   }
 
   static functionalPath(
     f: (x: number) => number,
     x0: number,
     x1: number,
-    increment: number
+    increment: number = 1
   ): PathBuilder {
     const vertexes: Vertex[] = [];
     for (let x = x0; x < x1; x += increment) {
       const y = f(x);
       vertexes.push(new Vertex({ x, y }, false));
     }
-    return new PathBuilder(vertexes, false, null);
+    return new PathBuilder(vertexes, false);
   }
 
   static top(source: PathBuilder): number {
@@ -371,11 +401,12 @@ export class PathBuilder {
     if (this.vertexes.length < 2) {
       return this; // do nothing
     }
-    source.fitBetweenPoints(
+    const fitted = PathBuilder.fitPathBetweenPoints(
+      source,
       this.vertexes[this.vertexes.length - 1].point,
       this.vertexes[0].point
     );
-    return this.mergePath(source);
+    return this.mergePath(fitted);
   }
 
   transformPath(transform: Matrix): PathBuilder {
@@ -385,7 +416,10 @@ export class PathBuilder {
     return this;
   }
 
-  /// mapVertexes
+  mapVertexes(transform: (vertex: Vertex) => Vertex) {
+    this.vertexes.forEach((vertex) => transform(vertex));
+    return this;
+  }
 
   // geom. transform path to fit the given points
   fitBetweenPoints(first: Point, last: Point): PathBuilder {
