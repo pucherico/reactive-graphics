@@ -1,8 +1,8 @@
 import { Drawable, Identity, Matrix, ORIGIN } from "..";
 import { PathBuilder } from "./path";
 
-interface PathModel {
-  builder: PathBuilder;
+interface PathModel<M> {
+  builder: PathBuilder<M>;
   fill: boolean;
 }
 
@@ -28,9 +28,9 @@ const enum CommandType {
 
 type ContextCommand = (ctx: CanvasRenderingContext2D) => void;
 
-interface Request {
+interface Request<M> {
   type: RequestType;
-  payload: PathModel | Path2D | Modeler | Drawable | ContextCommand;
+  payload: PathModel<M> | Path2D | Modeler | Drawable | ContextCommand;
   transform?: Matrix;
 }
 
@@ -39,18 +39,22 @@ interface Command {
   action: PathInfo | Drawable | ContextCommand;
 }
 
-export class ModelerContext {
-  constructor(public readonly modeler: Modeler, private requests: Request[]) {}
+export class ModelerContext<M> {
+  constructor(public readonly modeler: M, private requests: Request<M>[]) {}
 
-  fill(builder: PathBuilder) {
-    this.endPath(builder, true);
+  fill(builder: PathBuilder<M>) {
+    if (this.modeler !== null) {
+      this.endPath(builder, true);
+    }
   }
 
-  stroke(builder: PathBuilder) {
-    this.endPath(builder, false);
+  stroke(builder: PathBuilder<M>) {
+    if (this.modeler !== null) {
+      this.endPath(builder, false);
+    }
   }
 
-  private endPath(builder: PathBuilder, fill: boolean) {
+  private endPath(builder: PathBuilder<M>, fill: boolean) {
     this.requests.push({
       type: RequestType.PATH_MODEL,
       payload: { builder, fill },
@@ -60,7 +64,7 @@ export class ModelerContext {
 }
 
 export class Modeler {
-  constructor(private requests: Request[] = []) {}
+  constructor(private requests: Request<Modeler>[] = []) {}
 
   static new(): Modeler {
     /// newGraphic() | newGraphObject() ó graphic() | graphObject() | functional() | path2D(path2D | (path2D)=> {}})
@@ -82,14 +86,14 @@ export class Modeler {
     return Modeler.new().include(source, transform);
   }
 
-  newPath(): PathBuilder {
+  newPath(): PathBuilder<Modeler> {
     const context = new ModelerContext(this, this.requests);
-    return PathBuilder.newPath(context);
+    return new PathBuilder<Modeler>([], false, context);
   }
 
-  newClosedPath(): PathBuilder {
+  newClosedPath(): PathBuilder<Modeler> {
     const context = new ModelerContext(this, this.requests);
-    return PathBuilder.newClosedPath(context);
+    return new PathBuilder<Modeler>([], true, context);
   }
 
   fillRect(x: number, y: number, w: number, h: number): Modeler {
@@ -175,7 +179,7 @@ export class Modeler {
   private buildWithTransform(transform: Matrix): Drawable {
     const commands: Command[] = this.requests.map((request) => {
       if (request.type === RequestType.PATH_MODEL) {
-        const pm: PathModel = request.payload as PathModel;
+        const pm: PathModel<Modeler> = request.payload as PathModel<Modeler>;
         if (!request.transform)
           throw new Error("transform is required for PATH MODEL");
         // Realizamos la construcción de Path2D's de antemano (en lugar de desde el objeto devuelvo)
@@ -211,7 +215,7 @@ export class Modeler {
       } else if (request.type === RequestType.MODELER) {
         const submodel: Modeler = request.payload as Modeler;
         if (!request.transform)
-        throw new Error("transform is required for MODELER");
+          throw new Error("transform is required for MODELER");
         const t1 = new DOMMatrix(transform.coefficients);
         const t2 = new DOMMatrix(request.transform.coefficients);
         const t = t1.multiply(t2);
@@ -263,6 +267,10 @@ export class Modeler {
         });
         context.restore();
       },
+      // isPointInGraph(point: Point) {
+      //   commands.forEach()
+      //   return context.isPointInPath(pathInfo.path);
+      // }
     };
   }
 }

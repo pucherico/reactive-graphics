@@ -16,8 +16,10 @@ import { Subscription, Subject, Observable, interval, timer, range, of, from, fr
   export interface Traceable { position: Point }
   
   export interface GraphObject extends Drawable, Traceable {
-    getBoundingRect(): Rect;
-    getBoundaries(): Rect[];
+    getBoundingRect(): Rect; /// | null
+    getBoundaries(): Rect[]; /// deprecated?
+    // isPointInGraph(context: CanvasRenderingContext2D, point: Point): boolean; // point in device coords
+    // collisionPoints(): Point[]; // point coords?
   }
   
   /**

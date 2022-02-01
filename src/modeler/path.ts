@@ -1,5 +1,5 @@
 import { Identity, Matrix, ORIGIN, Point, vector } from "..";
-import { Modeler, ModelerContext } from "./modeler";
+import { ModelerContext } from "./modeler";
 
 const makeCoords = (...coords: number[]): Point[] => {
   if (coords.length % 2 !== 0) {
@@ -32,42 +32,60 @@ export class Vertex {
   }
 }
 
-export class PathBuilder {
-  private constructor(
+export class PathBuilder<M> {
+  constructor(
     private vertexes: Vertex[],
     private readonly closedPath: boolean,
-    private context?: ModelerContext
+    private context: ModelerContext<M>
   ) {}
 
-  static newPath(context?: ModelerContext): PathBuilder {
-    return new PathBuilder([], false, context);
+  static _nullModelerContext: ModelerContext<null>;
+
+  private static nullModelerContext(): ModelerContext<null> {
+    return PathBuilder._nullModelerContext
+      ? PathBuilder._nullModelerContext
+      : (PathBuilder._nullModelerContext = new ModelerContext<null>(null, []));
   }
 
-  static newClosedPath(context?: ModelerContext): PathBuilder {
-    return new PathBuilder([], true, context);
+  static newPath(): PathBuilder<null> {
+    return new PathBuilder([], false, PathBuilder.nullModelerContext());
   }
 
-  static reversePath(source: PathBuilder): PathBuilder {
-    return new PathBuilder(source.vertexes.reverse(), source.closedPath);
+  static newClosedPath(): PathBuilder<null> {
+    return new PathBuilder([], true, PathBuilder.nullModelerContext());
   }
 
-  static symmetricPathHorizontal(source: PathBuilder, y = 0): PathBuilder {
+  static reversePath<T>(source: PathBuilder<T>): PathBuilder<T> {
+    return new PathBuilder(
+      source.vertexes.reverse(),
+      source.closedPath,
+      source.context
+    );
+  }
+
+  static symmetricPathHorizontal<T>(
+    source: PathBuilder<T>,
+    y = 0
+  ): PathBuilder<T> {
     const vertexes = source.vertexes.map(
       (vertex) =>
         new Vertex({ x: vertex.x, y: y - (vertex.y - y) }, vertex.isControl)
     );
-    return new PathBuilder(vertexes, source.closedPath);
+    return new PathBuilder(vertexes, source.closedPath, source.context);
   }
 
-  static symmetricPathVertical(source: PathBuilder, x = 0): PathBuilder {
+  static symmetricPathVertical<T>(
+    source: PathBuilder<T>,
+    x = 0
+  ): PathBuilder<T> {
     const vertexes = source.vertexes.map(
       (vertex) =>
         new Vertex({ x: x - (vertex.x - x), y: vertex.y }, vertex.isControl)
     );
-    return new PathBuilder(vertexes, source.closedPath);
+    return new PathBuilder(vertexes, source.closedPath, source.context);
   }
 
-  static symmetricPath(source: PathBuilder): PathBuilder {
+  static symmetricPath<T>(source: PathBuilder<T>): PathBuilder<T> {
     if (source.vertexes.length < 2) {
       return source;
     }
@@ -84,11 +102,11 @@ export class PathBuilder {
     return PathBuilder.transformPath(source, transform);
   }
 
-  static fitPathBetweenPoints(
-    source: PathBuilder,
+  static fitPathBetweenPoints<T>(
+    source: PathBuilder<T>,
     first: Point,
     last: Point
-  ): PathBuilder {
+  ): PathBuilder<T> {
     if (source.vertexes.length < 2) {
       return source;
     }
@@ -106,20 +124,23 @@ export class PathBuilder {
     return PathBuilder.transformPath(source, transform);
   }
 
-  static transformPath(source: PathBuilder, transform: Matrix): PathBuilder {
+  static transformPath<T>(
+    source: PathBuilder<T>,
+    transform: Matrix
+  ): PathBuilder<T> {
     const vertexes = source.vertexes.map(
       (vertex) =>
         new Vertex(transform.transform(vertex.point), vertex.isControl)
     );
-    return new PathBuilder(vertexes, source.closedPath);
+    return new PathBuilder(vertexes, source.closedPath, source.context);
   }
 
-  static mapVertexes(
-    source: PathBuilder,
+  static mapVertexes<T>(
+    source: PathBuilder<T>,
     transform: (vertex: Vertex) => Vertex
   ) {
     const vertexes = source.vertexes.map((vertex) => transform(vertex));
-    return new PathBuilder(vertexes, source.closedPath);
+    return new PathBuilder(vertexes, source.closedPath, source.context);
   }
 
   static functionalPath(
@@ -127,62 +148,66 @@ export class PathBuilder {
     x0: number,
     x1: number,
     increment: number = 1
-  ): PathBuilder {
+  ): PathBuilder<null> {
     const vertexes: Vertex[] = [];
     for (let x = x0; x < x1; x += increment) {
       const y = f(x);
       vertexes.push(new Vertex({ x, y }, false));
     }
-    return new PathBuilder(vertexes, false);
+    return new PathBuilder<null>(
+      vertexes,
+      false,
+      PathBuilder.nullModelerContext()
+    );
   }
 
-  static top(source: PathBuilder): number {
+  static top<T>(source: PathBuilder<T>): number {
     return Math.min(...source.vertexes.map((vertex) => vertex.y));
   }
 
-  static topVertexes(source: PathBuilder): Vertex[] {
+  static topVertexes<T>(source: PathBuilder<T>): Vertex[] {
     const top = PathBuilder.top(source);
     return source.vertexes.filter((vertex) => vertex.y === top);
   }
 
-  static bottom(source: PathBuilder): number {
+  static bottom<T>(source: PathBuilder<T>): number {
     return Math.max(...source.vertexes.map((vertex) => vertex.y));
   }
 
-  static bottomVertexes(source: PathBuilder): Vertex[] {
+  static bottomVertexes<T>(source: PathBuilder<T>): Vertex[] {
     const bottom = PathBuilder.bottom(source);
     return source.vertexes.filter((vertex) => vertex.y === bottom);
   }
 
-  static left(source: PathBuilder): number {
+  static left<T>(source: PathBuilder<T>): number {
     return Math.min(...source.vertexes.map((vertex) => vertex.x));
   }
 
-  static leftVertexes(source: PathBuilder): Vertex[] {
+  static leftVertexes<T>(source: PathBuilder<T>): Vertex[] {
     const left = PathBuilder.left(source);
     return source.vertexes.filter((vertex) => vertex.x === left);
   }
 
-  static right(source: PathBuilder): number {
+  static right<T>(source: PathBuilder<T>): number {
     return Math.max(...source.vertexes.map((vertex) => vertex.x));
   }
 
-  static rightVertexes(source: PathBuilder): Vertex[] {
+  static rightVertexes<T>(source: PathBuilder<T>): Vertex[] {
     const right = PathBuilder.right(source);
     return source.vertexes.filter((vertex) => vertex.x === right);
   }
 
-  static firstVertex(source: PathBuilder): Vertex | null {
+  static firstVertex<T>(source: PathBuilder<T>): Vertex | null {
     return source.vertexes.length > 0 ? source.vertexes[0] : null;
   }
 
-  static lastVertex(source: PathBuilder): Vertex | null {
+  static lastVertex<T>(source: PathBuilder<T>): Vertex | null {
     return source.vertexes.length > 0
       ? source.vertexes[source.vertexes.length - 1]
       : null;
   }
 
-  static nearestVertex(source: PathBuilder, point: Point): Vertex {
+  static nearestVertex<T>(source: PathBuilder<T>, point: Point): Vertex {
     const { vertex } = source.vertexes
       .map((vertex) => {
         const v = vector(point, vertex.point);
@@ -206,12 +231,12 @@ export class PathBuilder {
     return Math.atan2(v.y, v.x) - Math.atan2(u.y, u.x);
   }
 
-  vertex(vertex: Vertex): PathBuilder {
+  vertex(vertex: Vertex): PathBuilder<M> {
     this.vertexes.push(vertex);
     return this;
   }
 
-  points(...coords: number[]): PathBuilder {
+  points(...coords: number[]): PathBuilder<M> {
     const newVertexes = makeCoords(...coords).map((point) => new Vertex(point));
     this.vertexes.push(...newVertexes);
     return this;
@@ -222,7 +247,7 @@ export class PathBuilder {
     y: number,
     controlPoint: boolean = false,
     vertexCb: ((vertex: Vertex) => void) | null = null
-  ): PathBuilder {
+  ): PathBuilder<M> {
     const vertex = new Vertex({ x, y }, controlPoint);
     this.vertexes.push(vertex);
     if (vertexCb !== null) {
@@ -235,7 +260,7 @@ export class PathBuilder {
     x: number,
     controlPoint: boolean = false,
     vertexCb: ((vertex: Vertex) => void) | null = null
-  ): PathBuilder {
+  ): PathBuilder<M> {
     const last = this.lastPoint();
     return this.point(x, last.y, controlPoint, vertexCb);
   }
@@ -244,14 +269,16 @@ export class PathBuilder {
     y: number,
     controlPoint: boolean = false,
     vertexCb: ((vertex: Vertex) => void) | null = null
-  ): PathBuilder {
+  ): PathBuilder<M> {
     const last = this.lastPoint();
     return this.point(last.x, y, controlPoint, vertexCb);
   }
 
   // Create a calculated control point reflection from the two last points
   // Idem to forwardSegment(1, 0, true, vertexCb), but more efficient
-  reflection(vertexCb: ((vertex: Vertex) => void) | null = null): PathBuilder {
+  reflection(
+    vertexCb: ((vertex: Vertex) => void) | null = null
+  ): PathBuilder<M> {
     if (this.vertexes.length === 0) {
       return this; // do nothing
     }
@@ -260,7 +287,7 @@ export class PathBuilder {
     return this.point(last.x + v.x, last.y + v.y, true, vertexCb);
   }
 
-  increments(...coords: number[]): PathBuilder {
+  increments(...coords: number[]): PathBuilder<M> {
     const start =
       this.vertexes.length > 0
         ? this.vertexes[this.vertexes.length - 1].point
@@ -284,7 +311,7 @@ export class PathBuilder {
     deltaY: number,
     controlPoint: boolean = false,
     vertexCb: ((vertex: Vertex) => void) | null = null
-  ): PathBuilder {
+  ): PathBuilder<M> {
     const last = this.lastPoint();
     const vertex = new Vertex(
       { x: last.x + deltaX, y: last.y + deltaY },
@@ -302,7 +329,7 @@ export class PathBuilder {
     alpha: number = 0,
     controlPoint: boolean = false,
     vertexCb?: (vertex: Vertex) => void
-  ): PathBuilder {
+  ): PathBuilder<M> {
     if (this.vertexes.length === 0) {
       return this; // do nothing
     }
@@ -316,7 +343,7 @@ export class PathBuilder {
     alpha: number = 0,
     controlPoint: boolean = false,
     vertexCb?: (vertex: Vertex) => void
-  ): PathBuilder {
+  ): PathBuilder<M> {
     if (this.vertexes.length === 0) {
       return this; // do nothing
     }
@@ -336,7 +363,7 @@ export class PathBuilder {
     distance = 0,
     controlPoint: boolean = false,
     vertexCb?: (vertex: Vertex) => void
-  ): PathBuilder {
+  ): PathBuilder<M> {
     const last = this.lastPoint();
     const h = Math.sqrt(x * x + y * y);
     const v: Point =
@@ -352,7 +379,7 @@ export class PathBuilder {
     distance = 0,
     controlPoint: boolean = false,
     vertexCb?: (vertex: Vertex) => void
-  ): PathBuilder {
+  ): PathBuilder<M> {
     const last = this.lastPoint();
     const vect = vector(last, { x, y });
     const h = Math.sqrt(vect.x * vect.x + vect.y * vect.y);
@@ -364,7 +391,7 @@ export class PathBuilder {
   }
 
   // Añade los puntos del path dado al propio path. Si el punto inicial del path dado coincidiera con el final del propio path, se evitará el duplicado.
-  mergePath(source: PathBuilder): PathBuilder {
+  mergePath<T>(source: PathBuilder<T>): PathBuilder<M> {
     let vertexes: Vertex[];
     if (this.vertexes.length > 0 && source.vertexes.length > 0) {
       const last = this.vertexes[this.vertexes.length - 1];
@@ -383,7 +410,7 @@ export class PathBuilder {
   }
 
   // translate source path so its first point is the same as the last point of this path, then add all points to this path
-  joinPath(source: PathBuilder): PathBuilder {
+  joinPath<T>(source: PathBuilder<T>): PathBuilder<M> {
     if (this.vertexes.length > 0 && source.vertexes.length > 0) {
       const last = this.vertexes[this.vertexes.length - 1];
       const sourceFirst = source.vertexes[0];
@@ -397,7 +424,7 @@ export class PathBuilder {
     return this;
   }
 
-  fitAndJoinPath(source: PathBuilder): PathBuilder {
+  fitAndJoinPath<T>(source: PathBuilder<T>): PathBuilder<M> {
     if (this.vertexes.length < 2) {
       return this; // do nothing
     }
@@ -409,7 +436,7 @@ export class PathBuilder {
     return this.mergePath(fitted);
   }
 
-  transformPath(transform: Matrix): PathBuilder {
+  transformPath(transform: Matrix): PathBuilder<M> {
     this.vertexes.forEach(
       (vertex) => (vertex.point = transform.transform(vertex.point))
     );
@@ -422,7 +449,7 @@ export class PathBuilder {
   }
 
   // geom. transform path to fit the given points
-  fitBetweenPoints(first: Point, last: Point): PathBuilder {
+  fitBetweenPoints(first: Point, last: Point): PathBuilder<M> {
     if (this.vertexes.length < 2) {
       return this;
     }
@@ -464,15 +491,15 @@ export class PathBuilder {
   }
 
   // fill and end path
-  fill(): Modeler | undefined {
-    this.context?.fill(this);
-    return this.context?.modeler;
+  fill(): M {
+    this.context.fill(this);
+    return this.context.modeler;
   }
 
   // stroke and end path
-  stroke(): Modeler | undefined {
-    this.context?.stroke(this);
-    return this.context?.modeler;
+  stroke(): M {
+    this.context.stroke(this);
+    return this.context.modeler;
   }
 
   fillToCanvas(context: CanvasRenderingContext2D) {
