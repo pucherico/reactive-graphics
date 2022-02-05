@@ -24,6 +24,7 @@
     "vite": "^2.6.4"
   },
   "dependencies": {
+    "@types/offscreencanvas": "^2019.6.4",
     "rxjs": "^7.4.0"
   },
   "repository": {

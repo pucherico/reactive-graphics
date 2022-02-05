@@ -32,6 +32,7 @@ import {
   toArray,
   take,
 } from "rxjs";
+import { ORIGIN } from ".";
 import { Rect, Point, vector, squareDistance, Matrix, Identity } from "./geom";
 import { differential, integration, some } from "./rx";
 
@@ -51,9 +52,9 @@ export interface Traceable {
 
 export interface GraphObject extends Drawable, Traceable {
   getBoundingRect(): Rect; /// | null
-  getBoundaries(): Rect[]; /// deprecated?
-  // isPointInGraph(context: CanvasRenderingContext2D, point: Point): boolean; // point in device coords
+  isPointInGraph(context: CanvasDrawPath, point: Point): boolean; // point in device coords
   // collisionPoints(): Point[]; // point coords?
+  getBoundaries(): Rect[]; /// deprecated?
 }
 
 /**
@@ -1003,6 +1004,27 @@ class CollisionLayer extends Layer<GraphObject> {
   }
 
   checkContact(point: Point): Observable<Contact> {
+    // transforming point from device coordinates to (world) layer coordinates
+    const layerPoint = this.inverseTransform(point);
+    return from(this.objects).pipe(
+      // PHASE I: fast-easy preliminary filtering
+      filter((graph) => graph.getBoundingRect().inside(layerPoint)),
+      // PHASE II: fine-grain filtering (by looking into every rect in the boundaries)
+      filter((graph) => {
+        /// construir OffscreenCanvas
+        const offCanvas = new OffscreenCanvas(1, 1);
+        const offContext = offCanvas.getContext("2d");
+        if (!offContext) return false;
+        offContext.setTransform(...this.geomMatrix.coefficients);
+        /// NOTE: offContext might be an attribute in order to avoid applying transform every time
+        return graph.isPointInGraph(offContext, point);
+      }),
+      map((graph) => ({ graph, vector: vector(graph.position, layerPoint) }))
+    );
+  }
+
+  // deprecated version
+  checkContactOld(point: Point): Observable<Contact> {
     // transforming point from device coordinates to (world) layer coordinates
     const layerPoint = this.inverseTransform(point);
     return from(this.objects).pipe(
