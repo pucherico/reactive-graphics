@@ -131,16 +131,9 @@ import { Observable, EMPTY, of, merge, concat,
         engine.pointer.filterPointWithoutContact(),
         switchMap(_point => engine.pointer.move$.pipe(
           takeUntil(engine.pointer.end$),
-          // map(p => engine.pointFromLayer(p, layer)), // No podemos considerar punto en layer, pues
-          // el layer está sufriendo cambios (traslación) y afecta al propio cálculo,
-          // en su lugar, calcularemos además del delta, el factor de escala del layer para multiplicarlo.
+          map(delta => engine.pointInLayer(delta, layer)),
           deltaPoint(),
-          map(delta => {
-            const [a, _b, _c, d, _e, _f] = engine.layerGeomCoefficients(layer);
-            const factor = 1 / Math.max(a, d);
-            return { delta, factor };
-          }),
-          map(({ delta, factor }) => factor === 1 ? delta : ({ x: delta.x * factor, y: delta.y * factor })),
+          scan((acc, cur) => ({ x: acc.x + cur.x, y: acc.y + cur.y })), // take into account (conteract) own layer transformation
           tap(delta => engine.translateLayers(delta, layer, ...dependentLayers)),
         )),
         share()
