@@ -9,7 +9,6 @@ import {
   from,
   fromEvent,
   merge,
-  zip,
   animationFrameScheduler,
   BehaviorSubject,
   EMPTY,
@@ -32,9 +31,8 @@ import {
   toArray,
   take,
 } from "rxjs";
-import { ORIGIN } from ".";
 import { Rect, Point, vector, squareDistance, Matrix, Identity } from "./geom";
-import { differential, integration, some } from "./rx";
+import { differential, integration } from "./rx";
 
 const CLICK_TIMEOUT = 300; // max time (ms) between start$ and end$ to be cosidered a click
 const CLICK_EPSILON = 25; // cuadrado de la distantia máxima permitida de arrastre para considerarse click
@@ -51,10 +49,11 @@ export interface Traceable {
 }
 
 export interface GraphObject extends Drawable, Traceable {
-  getBoundingRect(): Rect; /// | null
+  // getBoundingRect(): Rect; /// | null
+  maybePointInGraph(matrix: Matrix, point: Point): boolean;
   isPointInGraph(context: CanvasDrawPath, point: Point): boolean; // point in device coords
-  // collisionPoints(): Point[]; // point coords?
-  getBoundaries(): Rect[]; /// deprecated?
+  collisionDetectionPoints(): Point[]; // point coords? renombrar: checkPoints? contactPoints?
+  // getBoundaries(): Rect[]; /// deprecated?
 }
 
 /**
@@ -74,9 +73,11 @@ class Layer<T extends Drawable> {
   protected geomMatrix: Matrix = Identity;
   protected inveMatrix: Matrix | null = Identity; // inveMatrix?
   protected graphics: T[] = [];
+  protected graphMatrix: Map<T, Matrix> = new Map();
 
   addGraphic(graph: T) {
     this.graphics.push(graph);
+    this.graphMatrix.set(graph, Identity);
   }
 
   removeGraphic(graph: T) {
@@ -85,6 +86,7 @@ class Layer<T extends Drawable> {
     // if (i !== -1) this.graphics.splice(i, 1);
     // Immutable version
     this.graphics = this.graphics.filter((g) => g !== graph);
+    this.graphMatrix.delete(graph);
   }
 
   bringToTop(graph: T) {
@@ -146,11 +148,23 @@ class Layer<T extends Drawable> {
     this.inveMatrix = null;
   }
 
+  transformGraph(graph: T, matrix: Matrix) {
+    const gmatrix = this.graphMatrix.get(graph);
+    if (!gmatrix) throw new Error("graph matrix not found");
+    this.graphMatrix.set(graph, gmatrix.multiply(matrix));
+  }
+
   renderObjects(context: CanvasRenderingContext2D) {
     context.save();
     const [a, b, c, d, e, f] = this.geomMatrix.coefficients;
     context.setTransform(a, b, c, d, e, f);
-    this.graphics.map((graph) => graph.draw(context));
+    this.graphics.forEach((graph) => {
+      context.save();
+      const gmatrix = this.graphMatrix.get(graph);
+      if (gmatrix) context.transform(...gmatrix.coefficients);
+      graph.draw(context);
+      context.restore();
+    });
     context.restore();
   }
 }
@@ -588,6 +602,11 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
     this.layers[layer].geomCoefficients = [a, b, c, d, e, f];
   }
 
+  transformGraph(graph: Drawable, matrix: Matrix) {
+    const layer = this.layerOfGraph(graph);
+    this.layers[layer].transformGraph(graph, matrix);
+  }
+
   public requestRender() {
     this.pendingRenderRequests++;
     if (this.pendingRenderRequests === 1) {
@@ -623,11 +642,16 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
 export class GraphContext<T extends Drawable> {
   constructor(private renderManager: RenderManager, public graph: T) {}
 
-  public effect(factory: EffectFactory<T>) {
+  transform(matrix: Matrix): GraphContext<T> {
+    this.renderManager.transformGraph(this.graph, matrix);
+    return this;
+  }
+
+  effect(factory: EffectFactory<T>) {
     this.renderManager.playEffect(factory(this.graph));
   }
 
-  public effects(...factories: EffectFactory<T>[]) {
+  effects(...factories: EffectFactory<T>[]) {
     factories.forEach((factory) => this.effect(factory));
   }
 }
@@ -1006,45 +1030,11 @@ class CollisionLayer extends Layer<GraphObject> {
   checkContact(point: Point): Observable<Contact> {
     // transforming point from device coordinates to (world) layer coordinates
     const layerPoint = this.inverseTransform(point);
-    return from(this.objects).pipe(
-      // PHASE I: fast-easy preliminary filtering
-      filter((graph) => graph.getBoundingRect().inside(layerPoint)),
-      // PHASE II: fine-grain filtering (by looking into every rect in the boundaries)
-      filter((graph) => {
-        /// construir OffscreenCanvas
-        const offCanvas = new OffscreenCanvas(1, 1);
-        const offContext = offCanvas.getContext("2d");
-        if (!offContext) return false;
-        offContext.setTransform(...this.geomMatrix.coefficients);
-        /// NOTE: offContext might be an attribute in order to avoid applying transform every time
-        return graph.isPointInGraph(offContext, point);
-      }),
-      map((graph) => ({ graph, vector: vector(graph.position, layerPoint) }))
-    );
-  }
-
-  // deprecated version
-  checkContactOld(point: Point): Observable<Contact> {
-    // transforming point from device coordinates to (world) layer coordinates
-    const layerPoint = this.inverseTransform(point);
-    return from(this.objects).pipe(
-      // PHASE I: fast-easy preliminary removing
-      filter((obj) => obj.getBoundingRect().inside(layerPoint)),
-      // PHASE II: thorough removing with remaining objects (by looking into every rect in the boundaries)
-      mergeMap((obj) =>
-        zip(
-          of(obj),
-          from(obj.getBoundaries()).pipe(
-            some((rect: Rect) => rect.inside(layerPoint))
-          )
-        ).pipe(
-          filter(([_obj, inside]: [GraphObject, boolean]) => inside),
-          map(([obj, _inside]: [GraphObject, boolean]) => ({
-            graph: obj,
-            vector: vector(obj.position, layerPoint),
-          }))
-        )
-      )
+    return this.checkCollisionPoint(layerPoint).pipe(
+      map(graph => ({
+        graph,
+        vector: vector(graph.position, layerPoint),
+      }))
     );
   }
 
@@ -1053,21 +1043,10 @@ class CollisionLayer extends Layer<GraphObject> {
     return range(0, objects.length).pipe(
       map((i) => objects[i]),
       filter((g) => g !== graph),
-      // PHASE I: fast-easy preliminary removing
-      filter((g) => g.getBoundingRect().intersect(graph.getBoundingRect())),
-      // PHASE II: thorough removing with remaining objects (by looking into every rect in the boundaries)
-      mergeMap((g) =>
-        from(g.getBoundaries()).pipe(
-          mergeMap((r: Rect) =>
-            from(graph.getBoundaries()).pipe(
-              some((rect: Rect) => r.intersect(rect))
-            )
-          ),
-          some((touched: boolean) => touched),
-          // g and graph collide with each other
-          map((_collide) => g)
-        )
-      )
+      mergeMap(g => this.collide(graph, g).pipe(
+        filter(collide => collide),
+        mapTo(g)
+      )),
     );
   }
 
@@ -1084,24 +1063,64 @@ class CollisionLayer extends Layer<GraphObject> {
       // usado this.objects
       // filter(([i, j]) => i < this.objects.length && j < this.objects.length),
       map(([i, j]) => [objects[i], objects[j]] as [GraphObject, GraphObject]),
-      // PHASE I: fast-easy preliminary removing
-      filter(([graph1, graph2]: [GraphObject, GraphObject]) =>
-        graph1.getBoundingRect().intersect(graph2.getBoundingRect())
-      ),
-      // PHASE II: thorough removing with remaining objects (by looking into every rect in the boundaries)
-      mergeMap(([graph1, graph2]: [GraphObject, GraphObject]) =>
-        from(graph1.getBoundaries()).pipe(
-          mergeMap((rect1: Rect) =>
-            from(graph2.getBoundaries()).pipe(
-              some((rect2: Rect) => rect1.intersect(rect2))
-            )
-          ),
-          some((touched: boolean) => touched),
-          // graph1 and graph2 collide with each other
-          map((_collide) => [graph1, graph2] as [GraphObject, GraphObject])
-        )
-      )
+      mergeMap(([g1, g2]) => this.collide(g1, g2).pipe(
+        filter(collide => collide),
+        mapTo([g1, g2] as [GraphObject, GraphObject])
+      ))
     );
+  }
+
+  // check graph collisions with the given point (in layer coord.)
+  private checkCollisionPoint(point: Point): Observable<GraphObject> {
+    return from(this.objects).pipe(
+      // Evitamos usar coordenadas del dispositivo (this.geomMatrix.multiply(gmatrix)
+      // por motivos de eficiencia ya que todos los objetos pertenecen al mismo layer
+      map((graph) => ({
+        graph,
+        matrix: this.graphMatrix.get(graph) ?? Identity,
+      })),
+      // PHASE I: fast-easy preliminary filtering
+      // filter(({ graph }) => graph.getBoundingRect().inside(point)),
+      filter(({ graph, matrix }) =>
+        graph.maybePointInGraph(matrix, point)
+      ),
+      // PHASE II: fine-grain filtering
+      filter(({ graph, matrix }) => {
+        const offContext = this.matrix2context(matrix);
+        if (!offContext) return false;
+        return graph.isPointInGraph(offContext, point);
+      }),
+      map(({ graph }) => graph)
+    );
+  }
+
+  private collide(graph1: GraphObject, graph2: GraphObject): Observable<boolean> {
+    const matrix1 = this.graphMatrix.get(graph1) ?? Identity;
+    const matrix2 = this.graphMatrix.get(graph2) ?? Identity;
+    const source1 = from(graph1.collisionDetectionPoints()).pipe(
+      map((point) => ({ point, matrix: matrix2, graph: graph2 }))
+    );
+    const source2 = from(graph2.collisionDetectionPoints()).pipe(
+      map((point) => ({ point, matrix: matrix1, graph: graph1 }))
+    );
+    return merge(source1, source2).pipe(
+      // PHASE I: fast-easy preliminary filtering
+      filter(({ point, matrix, graph }) => graph.maybePointInGraph(matrix, point)),
+      // PHASE II: fine-grain filtering
+      filter(({ point, matrix, graph }) => {
+        const offContext = this.matrix2context(matrix);
+        if (!offContext) return false;
+        return graph.isPointInGraph(offContext, point);
+      }),
+      isEmpty()
+    )
+  }
+
+  private matrix2context(matrix: Matrix): OffscreenCanvasRenderingContext2D | null {
+    const offCanvas = new OffscreenCanvas(1, 1);
+    const offContext = offCanvas.getContext("2d");
+    offContext?.setTransform(...matrix.coefficients);
+    return offContext;
   }
 }
 

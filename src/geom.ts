@@ -1,22 +1,38 @@
-export interface Point { readonly x: number; readonly y: number }
-export const vector = (p: Point, q: Point) => ({x: q.x - p.x, y: q.y - p.y});
-export const squareDistance = (p: Point, q: Point) => (q.x - p.x) ** 2 + (q.y - p.y) ** 2;
-export const ORIGIN: Point = {x: 0, y: 0};
+export interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+export const vector = (p: Point, q: Point) => ({ x: q.x - p.x, y: q.y - p.y });
+export const squareDistance = (p: Point, q: Point) =>
+  (q.x - p.x) ** 2 + (q.y - p.y) ** 2;
+export const ORIGIN: Point = { x: 0, y: 0 };
 
-export const valuesBetween = (from: number, to: number) => (alpha: number) => from * (1 - alpha) + to * alpha;
-export const pointsBetween = (origin: Point, dest: Point) => (alpha: number) =>
-  ({x: origin.x * (1 - alpha) + dest.x * alpha, y: origin.y * (1 - alpha) + dest.y * alpha});
+export const valuesBetween = (from: number, to: number) => (alpha: number) =>
+  from * (1 - alpha) + to * alpha;
+export const pointsBetween =
+  (origin: Point, dest: Point) => (alpha: number) => ({
+    x: origin.x * (1 - alpha) + dest.x * alpha,
+    y: origin.y * (1 - alpha) + dest.y * alpha,
+  });
 
-export interface Dimension { width: number; height: number }
+export interface Dimension {
+  width: number;
+  height: number;
+}
 
 export class Rect {
-
   readonly min: Point;
   readonly max: Point;
 
   constructor(public readonly from: Point, public readonly to: Point) {
-      this.min = { x: Math.min(this.from.x, this.to.x), y: Math.min(this.from.y, this.to.y) };
-      this.max = { x: Math.max(this.from.x, this.to.x), y: Math.max(this.from.y, this.to.y) };
+    this.min = {
+      x: Math.min(this.from.x, this.to.x),
+      y: Math.min(this.from.y, this.to.y),
+    };
+    this.max = {
+      x: Math.max(this.from.x, this.to.x),
+      y: Math.max(this.from.y, this.to.y),
+    };
   }
 
   static fromDimension(dimension: Dimension): Rect {
@@ -24,8 +40,12 @@ export class Rect {
   }
 
   inside(point: Point): boolean {
-    return this.min.x <= point.x && point.x <= this.max.x
-        && this.min.y <= point.y && point.y <= this.max.y;
+    return (
+      this.min.x <= point.x &&
+      point.x <= this.max.x &&
+      this.min.y <= point.y &&
+      point.y <= this.max.y
+    );
   }
 
   contain(r: Rect): boolean {
@@ -33,32 +53,47 @@ export class Rect {
   }
 
   intersect(r: Rect): boolean {
-    return this.min.x < r.max.x && this.max.x > r.min.x
-        && this.min.y < r.max.y && this.max.y > r.min.y;
+    return (
+      this.min.x < r.max.x &&
+      this.max.x > r.min.x &&
+      this.min.y < r.max.y &&
+      this.max.y > r.min.y
+    );
   }
 
   intersection(r: Rect): Rect {
-    return new Rect({ x: Math.max(this.min.x, r.min.x), y: Math.max(this.min.y, r.min.y) },
-                    { x: Math.min(this.max.x, r.max.x), y: Math.min(this.max.y, r.max.y) });
+    return new Rect(
+      { x: Math.max(this.min.x, r.min.x), y: Math.max(this.min.y, r.min.y) },
+      { x: Math.min(this.max.x, r.max.x), y: Math.min(this.max.y, r.max.y) }
+    );
   }
 
   boundingRect(r: Rect): Rect {
-    return new Rect({ x: Math.min(this.min.x, r.min.x), y: Math.min(this.min.y, r.min.y) },
-                    { x: Math.max(this.max.x, r.max.x), y: Math.max(this.max.y, r.max.y) });
+    return new Rect(
+      { x: Math.min(this.min.x, r.min.x), y: Math.min(this.min.y, r.min.y) },
+      { x: Math.max(this.max.x, r.max.x), y: Math.max(this.max.y, r.max.y) }
+    );
   }
 
   center(): Point {
-    return { x: (this.max.x + this.min.x) / 2, y: (this.max.y + this.min.y) / 2 };
+    return {
+      x: (this.max.x + this.min.x) / 2,
+      y: (this.max.y + this.min.y) / 2,
+    };
   }
 
   translate(vector: Point): Rect {
-    return new Rect({x: this.min.x + vector.x, y: this.min.y + vector.y},
-                    {x: this.max.x + vector.x, y: this.max.y + vector.y});
+    return new Rect(
+      { x: this.min.x + vector.x, y: this.min.y + vector.y },
+      { x: this.max.x + vector.x, y: this.max.y + vector.y }
+    );
   }
 
   scale(factor: number): Rect {
-    return new Rect({x: this.min.x * factor, y: this.min.y * factor},
-                    {x: this.max.x * factor, y: this.max.y * factor});
+    return new Rect(
+      { x: this.min.x * factor, y: this.min.y * factor },
+      { x: this.max.x * factor, y: this.max.y * factor }
+    );
   }
 }
 
@@ -71,7 +106,6 @@ export class Rect {
  *
  */
 export interface Matrix {
-
   coefficients: [number, number, number, number, number, number]; // a, b,  c, d,  e, f
 
   translate(point: Point): Matrix;
@@ -79,6 +113,7 @@ export interface Matrix {
   rotate(alpha: number): Matrix;
   inverse(): Matrix;
   transform(point: Point): Point;
+  multiply(m: Matrix): Matrix;
 }
 
 // class HomogeneousMatrix implements Matrix {
@@ -184,41 +219,51 @@ export interface Matrix {
  *
  */
 class FastHomogeneousMatrix implements Matrix {
+  public static identity: Matrix = new FastHomogeneousMatrix(1, 0, 0, 1, 0, 0);
 
-  public static identity: Matrix = new FastHomogeneousMatrix(1, 0,  0, 1,  0, 0);
-
-  public constructor(private a: number, private b: number,
-                     private c: number, private d: number,
-                     private e: number, private f: number) {}
+  public constructor(
+    private a: number,
+    private b: number,
+    private c: number,
+    private d: number,
+    private e: number,
+    private f: number
+  ) {}
 
   get coefficients(): [number, number, number, number, number, number] {
-    return [
-      this.a, this.b,
-      this.c, this.d,
-      this.e, this.f
-    ];
+    return [this.a, this.b, this.c, this.d, this.e, this.f];
   }
 
-  set coefficients([a, b, c, d, e, f]: [number, number, number, number, number, number]) {
-    this.a = a; this.b = b;
-    this.c = c; this.d = d;
-    this.e = e; this.f = f;
+  set coefficients([a, b, c, d, e, f]: [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number
+  ]) {
+    this.a = a;
+    this.b = b;
+    this.c = c;
+    this.d = d;
+    this.e = e;
+    this.f = f;
   }
 
   translate(point: Point): Matrix {
-    const t = new FastHomogeneousMatrix(1, 0,  0, 1,  point.x, point.y);
+    const t = new FastHomogeneousMatrix(1, 0, 0, 1, point.x, point.y);
     return this.multiply(t);
   }
 
   scale(sx: number, sy: number): Matrix {
-    const s = new FastHomogeneousMatrix(sx, 0,  0, sy,  0, 0);
+    const s = new FastHomogeneousMatrix(sx, 0, 0, sy, 0, 0);
     return this.multiply(s);
   }
 
   rotate(alpha: number): Matrix {
     const cos = Math.cos(alpha);
     const sin = Math.sin(alpha);
-    const r = new FastHomogeneousMatrix(cos, sin,  -sin, cos,  0, 0);
+    const r = new FastHomogeneousMatrix(cos, sin, -sin, cos, 0, 0);
     return this.multiply(r);
   }
 
@@ -235,24 +280,33 @@ class FastHomogeneousMatrix implements Matrix {
    */
   inverse(): Matrix {
     const { a, b, c, d, e, f } = this;
-    const det =  a * d - c * b; // determinant
+    const det = a * d - c * b; // determinant
     return new FastHomogeneousMatrix(
-                d / det,                -b / det,
-                -c / det,               a / det,
-                (c * f - d * e) / det,  (b * e - a * f) / det);
+      d / det,
+      -b / det,
+      -c / det,
+      a / det,
+      (c * f - d * e) / det,
+      (b * e - a * f) / det
+    );
   }
 
   transform(point: Point): Point {
-    return { x: this.a * point.x + this.c * point.y + this.e,
-             y: this.b * point.x + this.d * point.y + this.f };
+    return {
+      x: this.a * point.x + this.c * point.y + this.e,
+      y: this.b * point.x + this.d * point.y + this.f,
+    };
   }
 
-  private multiply(m: FastHomogeneousMatrix): Matrix {
+  multiply(m: FastHomogeneousMatrix): Matrix {
     const { a, b, c, d, e, f } = this;
     return new FastHomogeneousMatrix(
-                a * m.a + c * m.b,      b * m.a + d * m.b,
-                a * m.c + c * m.d,      b * m.c + d * m.d,
-                a * m.e + c * m.f + e,  b * m.e + d * m.f + f
+      a * m.a + c * m.b,
+      b * m.a + d * m.b,
+      a * m.c + c * m.d,
+      b * m.c + d * m.d,
+      a * m.e + c * m.f + e,
+      b * m.e + d * m.f + f
     );
   }
 }
