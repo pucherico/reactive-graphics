@@ -119,6 +119,11 @@ class Layer<T extends Drawable> {
     this.inveMatrix = null;
   }
 
+  transformLayer(matrix: Matrix) {
+    this.geomMatrix = this.geomMatrix.multiply(matrix);
+    this.inveMatrix = null;
+  }
+
   transform(point: Point): Point {
     return this.geomMatrix.transform(point);
   }
@@ -146,6 +151,10 @@ class Layer<T extends Drawable> {
     this.geomMatrix.coefficients = [a, b, c, d, e, f];
     // this.inveMatrix = this.geomMatrix.inverse();
     this.inveMatrix = null;
+  }
+
+  setTransformGraph(graph: T, matrix: Matrix) {
+    this.graphMatrix.set(graph, matrix);
   }
 
   transformGraph(graph: T, matrix: Matrix) {
@@ -281,6 +290,53 @@ class FrameManager {
 
   asleep(): boolean {
     return this.sleepAdapter.asleep();
+  }
+}
+
+interface Transformer {
+  rotate(alpha: number): Transformer;
+  scale(sx: number, xy: number): Transformer;
+  translate(tx: number, ty: number): Transformer;
+}
+
+class LayerTransformer implements Transformer {
+  constructor(private renderManager: RenderManager, private layer: number) {}
+
+  rotate(alpha: number): Transformer {
+    return this.transform(Identity.rotate(alpha));
+  }
+
+  scale(sx: number, sy: number): Transformer {
+    return this.transform(Identity.scale(sx, sy));
+  }
+
+  translate(tx: number, ty: number): Transformer {
+    return this.transform(Identity.translate({ x: tx, y: ty }));
+  }
+
+  private transform(matrix: Matrix): Transformer {
+    this.renderManager.transformLayer(this.layer, matrix);
+    return this;
+  }
+}
+class GraphTransformer implements Transformer {
+  constructor(private renderManager: RenderManager, private graph: Drawable) {}
+
+  rotate(alpha: number): Transformer {
+    return this.transform(Identity.rotate(alpha));
+  }
+
+  scale(sx: number, sy: number): Transformer {
+    return this.transform(Identity.scale(sx, sy));
+  }
+
+  translate(tx: number, ty: number): Transformer {
+    return this.transform(Identity.translate({ x: tx, y: ty }));
+  }
+
+  private transform(matrix: Matrix): Transformer {
+    this.renderManager.transformGraph(this.graph, matrix);
+    return this;
   }
 }
 
@@ -467,40 +523,59 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
     this.layers[layer].sendToBack(graph);
   }
 
-  scaleLayer(sx: number, sy: number, layer: number | null = null) {
-    layer = layer ?? this.currentLayer;
+  // scaleLayer(sx: number, sy: number, layer: number | null = null) {
+  //   layer = layer ?? this.currentLayer;
+  //   if (layer < 0 || layer >= this.layers.length) {
+  //     throw Error(`Invalid layer ${layer}.`);
+  //   }
+  //   this.layers[layer].scale(sx, sy);
+  // }
+
+  // scaleLayers(sx: number, sy: number, ...layers: number[]) {
+  //   layers.forEach((layer) => this.scaleLayer(sx, sy, layer));
+  // }
+
+  // rotateLayer(alpha: number, layer: number | null = null) {
+  //   layer = layer ?? this.currentLayer;
+  //   if (layer < 0 || layer >= this.layers.length) {
+  //     throw Error(`Invalid layer ${layer}.`);
+  //   }
+  //   this.layers[layer].rotate(alpha);
+  // }
+
+  // rotateLayers(alpha: number, ...layers: number[]) {
+  //   layers.forEach((layer) => this.rotateLayer(alpha, layer));
+  // }
+
+  // translateLayer(point: Point, layer: number | null = null) {
+  //   layer = layer ?? this.currentLayer;
+  //   if (layer < 0 || layer >= this.layers.length) {
+  //     throw Error(`Invalid layer ${layer}.`);
+  //   }
+  //   this.layers[layer].translate(point);
+  // }
+
+  // translateLayers(point: Point, ...layers: number[]) {
+  //   layers.forEach((layer) => this.translateLayer(point, layer));
+  // }
+
+  setTransformLayer(layer: number, matrix: Matrix) {
     if (layer < 0 || layer >= this.layers.length) {
       throw Error(`Invalid layer ${layer}.`);
     }
-    this.layers[layer].scale(sx, sy);
+    this.layers[layer].geomCoefficients = matrix.coefficients;
   }
 
-  scaleLayers(sx: number, sy: number, ...layers: number[]) {
-    layers.forEach((layer) => this.scaleLayer(sx, sy, layer));
-  }
-
-  rotateLayer(alpha: number, layer: number | null = null) {
-    layer = layer ?? this.currentLayer;
+  transformLayer(layer: number, matrix: Matrix) {
     if (layer < 0 || layer >= this.layers.length) {
       throw Error(`Invalid layer ${layer}.`);
     }
-    this.layers[layer].rotate(alpha);
+    this.layers[layer].transformLayer(matrix);
   }
 
-  rotateLayers(alpha: number, ...layers: number[]) {
-    layers.forEach((layer) => this.rotateLayer(alpha, layer));
-  }
-
-  translateLayer(point: Point, layer: number | null = null) {
-    layer = layer ?? this.currentLayer;
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    this.layers[layer].translate(point);
-  }
-
-  translateLayers(point: Point, ...layers: number[]) {
-    layers.forEach((layer) => this.translateLayer(point, layer));
+  layerTransformer(layer: number | null = null): Transformer {
+    const l = layer ?? this.currentLayer;
+    return new LayerTransformer(this, l);
   }
 
   layerOfGraph(graph: Drawable): number {
@@ -602,9 +677,18 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
     this.layers[layer].geomCoefficients = [a, b, c, d, e, f];
   }
 
+  setTransformGraph(graph: Drawable, matrix: Matrix) {
+    const layer = this.layerOfGraph(graph);
+    this.layers[layer].setTransformGraph(graph, matrix);
+  }
+
   transformGraph(graph: Drawable, matrix: Matrix) {
     const layer = this.layerOfGraph(graph);
     this.layers[layer].transformGraph(graph, matrix);
+  }
+
+  graphTransformer(graph: Drawable): Transformer {
+    return new GraphTransformer(this, graph);
   }
 
   public requestRender() {
@@ -1031,7 +1115,7 @@ class CollisionLayer extends Layer<GraphObject> {
     // transforming point from device coordinates to (world) layer coordinates
     const layerPoint = this.inverseTransform(point);
     return this.checkCollisionPoint(layerPoint).pipe(
-      map(graph => ({
+      map((graph) => ({
         graph,
         vector: vector(graph.position, layerPoint),
       }))
@@ -1043,10 +1127,12 @@ class CollisionLayer extends Layer<GraphObject> {
     return range(0, objects.length).pipe(
       map((i) => objects[i]),
       filter((g) => g !== graph),
-      mergeMap(g => this.collide(graph, g).pipe(
-        filter(collide => collide),
-        mapTo(g)
-      )),
+      mergeMap((g) =>
+        this.collide(graph, g).pipe(
+          filter((collide) => collide),
+          mapTo(g)
+        )
+      )
     );
   }
 
@@ -1063,10 +1149,12 @@ class CollisionLayer extends Layer<GraphObject> {
       // usado this.objects
       // filter(([i, j]) => i < this.objects.length && j < this.objects.length),
       map(([i, j]) => [objects[i], objects[j]] as [GraphObject, GraphObject]),
-      mergeMap(([g1, g2]) => this.collide(g1, g2).pipe(
-        filter(collide => collide),
-        mapTo([g1, g2] as [GraphObject, GraphObject])
-      ))
+      mergeMap(([g1, g2]) =>
+        this.collide(g1, g2).pipe(
+          filter((collide) => collide),
+          mapTo([g1, g2] as [GraphObject, GraphObject])
+        )
+      )
     );
   }
 
@@ -1081,9 +1169,7 @@ class CollisionLayer extends Layer<GraphObject> {
       })),
       // PHASE I: fast-easy preliminary filtering
       // filter(({ graph }) => graph.getBoundingRect().inside(point)),
-      filter(({ graph, matrix }) =>
-        graph.maybePointInGraph(matrix, point)
-      ),
+      filter(({ graph, matrix }) => graph.maybePointInGraph(matrix, point)),
       // PHASE II: fine-grain filtering
       filter(({ graph, matrix }) => {
         const offContext = this.matrix2context(matrix);
@@ -1094,7 +1180,10 @@ class CollisionLayer extends Layer<GraphObject> {
     );
   }
 
-  private collide(graph1: GraphObject, graph2: GraphObject): Observable<boolean> {
+  private collide(
+    graph1: GraphObject,
+    graph2: GraphObject
+  ): Observable<boolean> {
     const matrix1 = this.graphMatrix.get(graph1) ?? Identity;
     const matrix2 = this.graphMatrix.get(graph2) ?? Identity;
     const source1 = from(graph1.collisionDetectionPoints()).pipe(
@@ -1105,7 +1194,9 @@ class CollisionLayer extends Layer<GraphObject> {
     );
     return merge(source1, source2).pipe(
       // PHASE I: fast-easy preliminary filtering
-      filter(({ point, matrix, graph }) => graph.maybePointInGraph(matrix, point)),
+      filter(({ point, matrix, graph }) =>
+        graph.maybePointInGraph(matrix, point)
+      ),
       // PHASE II: fine-grain filtering
       filter(({ point, matrix, graph }) => {
         const offContext = this.matrix2context(matrix);
@@ -1113,10 +1204,12 @@ class CollisionLayer extends Layer<GraphObject> {
         return graph.isPointInGraph(offContext, point);
       }),
       isEmpty()
-    )
+    );
   }
 
-  private matrix2context(matrix: Matrix): OffscreenCanvasRenderingContext2D | null {
+  private matrix2context(
+    matrix: Matrix
+  ): OffscreenCanvasRenderingContext2D | null {
     const offCanvas = new OffscreenCanvas(1, 1);
     const offContext = offCanvas.getContext("2d");
     offContext?.setTransform(...matrix.coefficients);
