@@ -312,3 +312,15 @@ class FastHomogeneousMatrix implements Matrix {
 }
 
 export const Identity: Matrix = FastHomogeneousMatrix.identity;
+
+export const rotationMatrix: (alpha: number) => Matrix = (alpha) => {
+  const cos = Math.cos(alpha);
+  const sin = Math.sin(alpha);
+  return new FastHomogeneousMatrix(cos, sin, -sin, cos, 0, 0);
+};
+
+export const scalingMatrix: (sx: number, sy: number) => Matrix = (sx, sy) =>
+  new FastHomogeneousMatrix(sx, 0, 0, sy, 0, 0);
+
+export const translationMatrix: (point: Point) => Matrix = (point) =>
+  new FastHomogeneousMatrix(1, 0, 0, 1, point.x, point.y);

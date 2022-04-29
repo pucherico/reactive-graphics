@@ -29,6 +29,7 @@ import {
   ORIGIN,
   Identity,
   Matrix,
+  squareDistance,
 } from "./geom";
 import {
   Drawable,
@@ -79,7 +80,7 @@ const deltaLast = () => (source: Observable<Point>) =>
   );
 
 /** operator que dado una secuencia de tiempos en ms, devuelve los incrementos de tiempos entre valores */
-const deltaTime = (source: Observable<number>) =>
+export const deltaTime = (source: Observable<number>) =>
   source.pipe(
     scan(
       ({ time, delta: _ }: { time: number; delta: number }, t: number) => ({
@@ -92,7 +93,7 @@ const deltaTime = (source: Observable<number>) =>
   );
 
 /** operator que dada una secuencia de tiempos en ms, devuelve los tiempos relativos al primer tiempo */
-const elapsedTime = (source: Observable<number>) =>
+export const elapsedTime = (source: Observable<number>) =>
   source.pipe(
     scan(
       ({ time, delta: _ }: { time: number; delta: number }, t: number) => ({
@@ -112,11 +113,36 @@ const elapsedTime = (source: Observable<number>) =>
 const duration = (ms: number) => (source: Observable<number>) =>
   concat(
     source.pipe(
+      elapsedTime,
       map((time) => time / ms),
       takeWhile((alpha) => alpha < 1)
     ),
     of(1)
   );
+
+export const takeDuring = (duration: number) => (source: Observable<number>) =>
+  source.pipe(
+    elapsedTime,
+    takeWhile((time) => time <= duration)
+  );
+
+const distanceAtSpeed = (units: number, speed: number) =>
+  duration(units / speed);
+
+export const unitsPerSecond = (speed: number) => (source: Observable<number>) =>
+  source.pipe(map((time) => (time * speed) / 1000));
+
+export const velocity = (vect: Point, speed?: number) => {
+  const mod = speed ? Math.sqrt(vect.x * vect.x + vect.y * vect.y) : 1;
+  const v = speed
+    ? { x: (vect.x * speed) / mod, y: (vect.y * speed) / mod }
+    : vect;
+  return (source: Observable<number>) =>
+    source.pipe(
+      deltaTime,
+      map((time) => ({ x: (v.x * time) / 1000, y: (v.y * time) / 1000 }))
+    );
+};
 
 /**
  * Operador que dada una secuencia de tiempos en ms, realiza un movimiento PROGRESIVO entre dos puntos dados,
@@ -125,17 +151,28 @@ const duration = (ms: number) => (source: Observable<number>) =>
  * FLUJO SALIENTE: secuencia puntos entre los extremos dados
  */
 export const movement =
-  (from: Point, to: Point, ms: number, ease: boolean) =>
+  (from: Point, to: Point, ms: number, ease: boolean = false) =>
   (source: Observable<number>) =>
     source.pipe(
       /// Implementar esta lógica en operador moveTo(this.graphic, 500, true) params: Drawable, ms, ease.
-      elapsedTime,
       duration(ms),
       // tap(a => console.log(`alpha: ${a}`)),
       map((alpha: number) => (ease ? easyGoing(alpha) : alpha)),
       // tap(a => console.log(`alpha': ${a}`)),
       map(pointsBetween(from, to))
     );
+
+/**
+ * 
+ * Operator that given a sequence of timestamps (in ms) produce the points resulting of a movement 
+ * between two given points at a given speed.
+ * 
+ * INPUT STREAM: timestamps in ms.
+ * OUTPUT STREAM: sequence of points.
+ */
+export const movementAtSpeed =
+  (from: Point, to: Point, speed: number, ease: boolean = false) =>
+  movement(from, to, 1000 * Math.sqrt(squareDistance(from, to)) / speed, ease);
 
 /**
  * Operador generalizado que dada una secuencia de tiempos en ms, devuelve una progresión de valores entre 0 y 1,
@@ -151,7 +188,6 @@ export const span =
   (ms: number, ease = false) =>
   (source: Observable<number>) =>
     source.pipe(
-      elapsedTime,
       duration(ms),
       // tap(a => console.log(`alpha: ${a}`)),
       map((alpha: number) => (ease ? easyGoing(alpha) : alpha))
@@ -438,7 +474,6 @@ export class QuarterTurnEffect implements CanvasEffect {
       exhaustMap((init) =>
         this.engine.frame(this.target).pipe(
           // exhaustMap para evitar más de un proceso a la vez
-          elapsedTime,
           duration(500),
           map(easyGoing2),
           map(valuesBetween(init, init + Math.PI / 2)),
@@ -491,7 +526,6 @@ export class PickUpEffect implements CanvasEffect {
         tap(() => this.engine.bringToTop(this.target)),
         switchMap((_point) =>
           this.engine.frame(this.target).pipe(
-            elapsedTime,
             duration(500),
             map(easyGoing2),
             map(valuesBetween(1, 1.5)),
@@ -506,7 +540,6 @@ export class PickUpEffect implements CanvasEffect {
         map((_point) => this.target.elasticity), // partimos de la elasticidad previa al end$
         switchMap((max) =>
           this.engine.frame(this.target).pipe(
-            elapsedTime,
             duration(500),
             map(easyGoing2),
             map(valuesBetween(max, 1)),
