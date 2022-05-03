@@ -30,6 +30,8 @@ import {
   Identity,
   Matrix,
   squareDistance,
+  quadraticPoints,
+  bezierPoints,
 } from "./geom";
 import {
   Drawable,
@@ -121,9 +123,12 @@ const duration = (ms: number) => (source: Observable<number>) =>
   );
 
 export const takeDuring = (duration: number) => (source: Observable<number>) =>
-  source.pipe(
-    elapsedTime,
-    takeWhile((time) => time <= duration)
+  concat(
+    source.pipe(
+      elapsedTime,
+      takeWhile((time) => time <= duration)
+    ),
+    of(duration)
   );
 
 const distanceAtSpeed = (units: number, speed: number) =>
@@ -139,7 +144,8 @@ export const velocity = (vect: Point, speed?: number) => {
     : vect;
   return (source: Observable<number>) =>
     source.pipe(
-      deltaTime,
+      // deltaTime,
+      elapsedTime,
       map((time) => ({ x: (v.x * time) / 1000, y: (v.y * time) / 1000 }))
     );
 };
@@ -162,17 +168,95 @@ export const movement =
       map(pointsBetween(from, to))
     );
 
+export const quadraticMovement =
+  (
+    from: Point,
+    controlPoint: Point,
+    to: Point,
+    ms: number,
+    ease: boolean = false
+  ) =>
+  (source: Observable<number>) =>
+    source.pipe(
+      /// Implementar esta lógica en operador moveTo(this.graphic, 500, true) params: Drawable, ms, ease.
+      duration(ms),
+      // tap(a => console.log(`alpha: ${a}`)),
+      map((alpha: number) => (ease ? easyGoing(alpha) : alpha)),
+      // tap(a => console.log(`alpha': ${a}`)),
+      map(quadraticPoints(from, controlPoint, to))
+    );
+
+export const bezierMovement =
+  (
+    from: Point,
+    controlPoint1: Point,
+    controlPoint2: Point,
+    to: Point,
+    ms: number,
+    ease: boolean = false
+  ) =>
+  (source: Observable<number>) =>
+    source.pipe(
+      /// Implementar esta lógica en operador moveTo(this.graphic, 500, true) params: Drawable, ms, ease.
+      duration(ms),
+      // tap(a => console.log(`alpha: ${a}`)),
+      map((alpha: number) => (ease ? easyGoing(alpha) : alpha)),
+      // tap(a => console.log(`alpha': ${a}`)),
+      map(bezierPoints(from, controlPoint1, controlPoint2, to))
+    );
+
 /**
- * 
- * Operator that given a sequence of timestamps (in ms) produce the points resulting of a movement 
+ *
+ * Operator that given a sequence of timestamps (in ms) produce the points resulting of a movement
  * between two given points at a given speed.
- * 
+ *
  * INPUT STREAM: timestamps in ms.
  * OUTPUT STREAM: sequence of points.
  */
-export const movementAtSpeed =
-  (from: Point, to: Point, speed: number, ease: boolean = false) =>
-  movement(from, to, 1000 * Math.sqrt(squareDistance(from, to)) / speed, ease);
+export const movementAtSpeed = (
+  from: Point,
+  to: Point,
+  speed: number,
+  ease: boolean = false
+) =>
+  movement(
+    from,
+    to,
+    (1000 * Math.sqrt(squareDistance(from, to))) / speed,
+    ease
+  );
+
+export const quadraticMovementAtSpeed = (
+  from: Point,
+  controlPoint: Point,
+  to: Point,
+  speed: number,
+  ease: boolean = false
+) =>
+  quadraticMovement(
+    from,
+    controlPoint,
+    to,
+    (1000 * Math.sqrt(squareDistance(from, to))) / speed,
+    ease
+  );
+
+export const bezierMovementAtSpeed = (
+  from: Point,
+  controlPoint1: Point,
+  controlPoint2: Point,
+  to: Point,
+  speed: number,
+  ease: boolean = false
+) =>
+  bezierMovement(
+    from,
+    controlPoint1,
+    controlPoint2,
+    to,
+    (1000 * Math.sqrt(squareDistance(from, to))) / speed,
+    ease
+  );
 
 /**
  * Operador generalizado que dada una secuencia de tiempos en ms, devuelve una progresión de valores entre 0 y 1,
