@@ -19,6 +19,7 @@ import {
   takeUntil,
   exhaustMap,
   mergeMap,
+  distinctUntilChanged,
 } from "rxjs";
 import {
   valuesBetween,
@@ -27,6 +28,7 @@ import {
   vector,
   ORIGIN,
   Identity,
+  Matrix,
 } from "./geom";
 import {
   Drawable,
@@ -162,6 +164,7 @@ export const EMPTY_EFFECT: CanvasEffect = { target: null, pulse: () => EMPTY };
  * Conmute effects every time a switch$ (e.g. click$, hold$, etc) event comes.
  */
 export class EffectSwitcher implements CanvasEffect {
+  public readonly applyFromOrigin = false;
   private next = 0;
   private effects: CanvasEffect[];
 
@@ -340,7 +343,8 @@ export interface Spinwise {
   spin: number;
 }
 
-export class SpinEffect implements CanvasEffect {
+// deprecated
+export class OldSpinEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
     public target: Drawable & Spinwise,
@@ -357,6 +361,66 @@ export class SpinEffect implements CanvasEffect {
     );
   }
 }
+
+export class SpinEffect implements CanvasEffect {
+  constructor(
+    private frame$: Observable<number>,
+    public target: Drawable,
+    private period: number = 1000 // ms (negative for anticlockwise spin)
+  ) {}
+
+  pulse(): Observable<Matrix> {
+    return this.frame$.pipe(
+      deltaTime,
+      map((duration) => (2 * Math.PI * duration) / this.period),
+      map((radians) => Identity.rotate(radians))
+    );
+  }
+}
+
+export class OscillatorEffect implements CanvasEffect {
+  constructor(
+    private frame$: Observable<number>,
+    public target: Drawable,
+    private amplitude: number,
+    private horizontal: boolean = true,
+    private period: number = 1000 // ms (negative for anticlockwise spin)
+  ) {}
+
+  pulse(): Observable<Matrix> {
+    const offsetToPoint: (offset: number) => Point = this.horizontal
+      ? (offset) => ({ x: offset, y: 0 })
+      : (offset) => ({ x: 0, y: offset });
+    return this.frame$.pipe(
+      elapsedTime,
+      map((time) => (2 * Math.PI * time) / this.period), // mapTimeToRadians(period)
+      map((radians) => Math.sin(radians) * this.amplitude),
+      map(offsetToPoint),
+      deltaPoint(),
+      map((vect) => Identity.translate(vect))
+    );
+  }
+}
+
+export class FollowVectorsEffect implements CanvasEffect {
+  constructor(
+    private frame$: Observable<number>,
+    public target: Drawable,
+    private vectors: Point[],
+    private period: number = 1000
+  ) {} // ms
+
+  pulse(): Observable<Matrix> {
+    return this.frame$.pipe(
+      elapsedTime,
+      map((time) => ((time / this.period) >> 0) % this.vectors.length),
+      distinctUntilChanged(),
+      map((index) => this.vectors[index]),
+      map((vect) => Identity.translate(vect))
+    );
+  }
+}
+/// FollowPathEffect
 
 export class QuarterTurnEffect implements CanvasEffect {
   constructor(

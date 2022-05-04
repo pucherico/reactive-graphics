@@ -64,7 +64,7 @@ export interface GraphObject extends Drawable, Traceable {
  */
 export interface CanvasEffect {
   readonly target: Drawable | null;
-  pulse(): Observable<any>; // Rendering request ticks
+  pulse(): Observable<Matrix | null>; // Rendering request ticks
 }
 
 export type EffectFactory<T> = (t: T) => CanvasEffect;
@@ -74,10 +74,12 @@ class Layer<T extends Drawable> {
   protected inveMatrix: Matrix | null = Identity; // inveMatrix?
   protected graphics: T[] = [];
   protected graphMatrix: Map<T, Matrix> = new Map();
+  protected graphMemory: Map<T, TransformChain> = new Map();
 
   addGraphic(graph: T) {
     this.graphics.push(graph);
     this.graphMatrix.set(graph, Identity);
+    this.graphMemory.set(graph, new TransformChain());
   }
 
   removeGraphic(graph: T) {
@@ -87,6 +89,28 @@ class Layer<T extends Drawable> {
     // Immutable version
     this.graphics = this.graphics.filter((g) => g !== graph);
     this.graphMatrix.delete(graph);
+    this.graphMemory.delete(graph);
+  }
+
+  newMemoryMatrix(graph: T, applyFromOrigin: boolean): number {
+    const memMatrix = this.graphMemory.get(graph);
+    if (!memMatrix)
+      throw new Error("Error: transform chain does not exist for graph");
+    return memMatrix.newTransformation(applyFromOrigin);
+  }
+
+  getTransformMemory(graph: T) {
+    const memMatrix = this.graphMemory.get(graph);
+    if (!memMatrix)
+      throw new Error("Error: transform chain does not exist for graph");
+    return memMatrix.getTransfom();
+  }
+
+  transformMemory(graph: T, memIndex: number, matrix: Matrix) {
+    const memMatrix = this.graphMemory.get(graph);
+    if (!memMatrix)
+      throw new Error("Error: transform chain does not exist for graph");
+    memMatrix.transform(memIndex, matrix);
   }
 
   bringToTop(graph: T) {
@@ -153,6 +177,12 @@ class Layer<T extends Drawable> {
     this.inveMatrix = null;
   }
 
+  getTransformGraph(graph: T): Matrix {
+    const gmatrix = this.graphMatrix.get(graph);
+    if (!gmatrix) throw new Error("graph matrix not found");
+    return gmatrix;
+  }
+
   setTransformGraph(graph: T, matrix: Matrix) {
     this.graphMatrix.set(graph, matrix);
   }
@@ -171,6 +201,8 @@ class Layer<T extends Drawable> {
       context.save();
       const gmatrix = this.graphMatrix.get(graph);
       if (gmatrix) context.transform(...gmatrix.coefficients);
+      const mmatrix = this.getTransformMemory(graph);
+      context.transform(...mmatrix.coefficients);
       graph.draw(context);
       context.restore();
     });
@@ -188,6 +220,35 @@ class GraphStatus {
 
   public removed(graph: Drawable) {
     this.removedSubject.next(graph);
+  }
+}
+
+class TransformChain {
+  chain: Matrix[] = [];
+  fromOrigin: boolean[] = [];
+
+  newTransformation(applyFromOrigin: boolean): number {
+    this.fromOrigin.push(applyFromOrigin);
+    return this.chain.push(Identity) - 1;
+  }
+
+  transform(index: number, matrix: Matrix) {
+    this.chain[index] = matrix.multiply(this.chain[index]);
+  }
+
+  getTransfom(): Matrix {
+    return this.chain.reduce((result, currentMatrix, index) => {
+      let wrappedMatrix;
+      if (this.fromOrigin[index]) {
+        const [_a, _b, _c, _d, e, f] = result.coefficients;
+        wrappedMatrix = Identity.translate({ x: e, y: f })
+          .multiply(currentMatrix)
+          .translate({ x: -e, y: -f });
+      } else {
+        wrappedMatrix = currentMatrix;
+      }
+      return wrappedMatrix.multiply(result);
+    }, Identity);
   }
 }
 
@@ -340,6 +401,11 @@ class GraphTransformer implements Transformer {
   }
 }
 
+interface ChainedEffect {
+  effect: CanvasEffect;
+  applyFromOrigin: boolean;
+}
+
 export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
   public currentLayer: number;
   protected layerMap: Map<Drawable, number> = new Map();
@@ -349,7 +415,7 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
   public fps$: Observable<number>; // count of frames per second rendered. This value is updated every second.
   public status: GraphStatus = new GraphStatus();
   private readonly frameManager: FrameManager;
-  private readonly effect$: Subject<CanvasEffect> = new Subject();
+  private readonly effect$: Subject<ChainedEffect> = new Subject();
   private effectSub: Subscription | null = null;
   private fpsSubject?: Subject<number>;
   private pendingRenderRequests = 0;
@@ -362,16 +428,30 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
     this.fpsSubject = new Subject<number>();
     this.effectSub = this.effect$
       .pipe(
-        mergeMap((effect) =>
-          effect
-            .pulse()
-            .pipe(
-              takeUntil(
-                this.status.removed$.pipe(
-                  filter((graph) => graph === effect.target)
-                )
+        map((chainedEffect) => ({
+          effect: chainedEffect.effect,
+          index: this.registerEffectMemory(
+            chainedEffect.effect,
+            chainedEffect.applyFromOrigin
+          ),
+        })),
+        mergeMap(({ effect, index }) =>
+          effect.pulse().pipe(
+            tap((matrixOrNull) => {
+              if (matrixOrNull !== null && effect.target !== null) {
+                const matrix = matrixOrNull;
+                // this.transformGraph(effect.target, matrix); ///  transformMem && use in renderObjects
+                this.transformMemory(effect.target, index, matrix);
+                /// pending case of layer effect
+                // this.transformLayer(layer, matrix);
+              }
+            }),
+            takeUntil(
+              this.status.removed$.pipe(
+                filter((graph) => graph === effect.target)
               )
             )
+          )
         ),
         auditTime(0, animationFrameScheduler) // throttleTime(0, animationFrame)
       )
@@ -384,6 +464,26 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
       map((group) => group.length)
     );
   }
+
+  private registerEffectMemory(
+    effect: CanvasEffect,
+    applyFromOrigin: boolean
+  ): number {
+    if (effect.target === null) return -1;
+    const layer = this.layerOfGraph(effect.target);
+    return this.layers[layer].newMemoryMatrix(effect.target, applyFromOrigin);
+  }
+
+  // private transformable(effect: CanvasEffect, memIndex: number): () => Matrix {
+  //   if (effect.target !== null) {
+  //     const target = effect.target as Drawable;
+  //     const layer = this.layerOfGraph(target);
+  //     return () => this.layers[layer].getTransformMemory(target, memIndex);
+  //     // return () => this.getTransformGraph(target);
+  //   } else {
+  //     return () => Identity;
+  //   }
+  // }
 
   get frame$() {
     return this.frameManager.frame$;
@@ -470,13 +570,13 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
    * Produce a new Effect.
    * This method cannot be invoked before init().
    */
-  playEffect(effect: CanvasEffect) {
+  playEffect(effect: CanvasEffect, applyFromOrigin = false) {
     if (this.effectSub === null) {
       throw new Error(
         "Invalid state: You Can't add any effect before initialization."
       );
     }
-    this.effect$.next(effect);
+    this.effect$.next({ effect, applyFromOrigin });
   }
 
   addGraphic(
@@ -677,6 +777,11 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
     this.layers[layer].geomCoefficients = [a, b, c, d, e, f];
   }
 
+  getTransformGraph(graph: Drawable): Matrix {
+    const layer = this.layerOfGraph(graph);
+    return this.layers[layer].getTransformGraph(graph);
+  }
+
   setTransformGraph(graph: Drawable, matrix: Matrix) {
     const layer = this.layerOfGraph(graph);
     this.layers[layer].setTransformGraph(graph, matrix);
@@ -689,6 +794,11 @@ export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
 
   graphTransformer(graph: Drawable): Transformer {
     return new GraphTransformer(this, graph);
+  }
+
+  transformMemory(graph: Drawable, memIndex: number, matrix: Matrix) {
+    const layer = this.layerOfGraph(graph);
+    this.layers[layer].transformMemory(graph, memIndex, matrix);
   }
 
   public requestRender() {
@@ -731,12 +841,17 @@ export class GraphContext<T extends Drawable> {
     return this;
   }
 
-  effect(factory: EffectFactory<T>) {
-    this.renderManager.playEffect(factory(this.graph));
+  effect(
+    factory: EffectFactory<T>,
+    applyFromOrigin: boolean = false
+  ): GraphContext<T> {
+    this.renderManager.playEffect(factory(this.graph), applyFromOrigin);
+    return this;
   }
 
-  effects(...factories: EffectFactory<T>[]) {
+  effects(...factories: EffectFactory<T>[]): GraphContext<T> {
     factories.forEach((factory) => this.effect(factory));
+    return this;
   }
 }
 
