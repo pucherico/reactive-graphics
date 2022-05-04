@@ -131,7 +131,7 @@ export const takeDuring = (duration: number) => (source: Observable<number>) =>
     of(duration)
   );
 
-const distanceAtSpeed = (units: number, speed: number) =>
+export const distanceAtSpeed = (units: number, speed: number) =>
   duration(units / speed);
 
 export const unitsPerSecond = (speed: number) => (source: Observable<number>) =>
