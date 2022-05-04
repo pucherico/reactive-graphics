@@ -19,6 +19,7 @@ import {
   takeUntil,
   exhaustMap,
   mergeMap,
+  distinctUntilChanged,
 } from "rxjs";
 import {
   valuesBetween,
@@ -27,6 +28,10 @@ import {
   vector,
   ORIGIN,
   Identity,
+  Matrix,
+  squareDistance,
+  quadraticPoints,
+  bezierPoints,
 } from "./geom";
 import {
   Drawable,
@@ -77,7 +82,7 @@ const deltaLast = () => (source: Observable<Point>) =>
   );
 
 /** operator que dado una secuencia de tiempos en ms, devuelve los incrementos de tiempos entre valores */
-const deltaTime = (source: Observable<number>) =>
+export const deltaTime = (source: Observable<number>) =>
   source.pipe(
     scan(
       ({ time, delta: _ }: { time: number; delta: number }, t: number) => ({
@@ -90,7 +95,7 @@ const deltaTime = (source: Observable<number>) =>
   );
 
 /** operator que dada una secuencia de tiempos en ms, devuelve los tiempos relativos al primer tiempo */
-const elapsedTime = (source: Observable<number>) =>
+export const elapsedTime = (source: Observable<number>) =>
   source.pipe(
     scan(
       ({ time, delta: _ }: { time: number; delta: number }, t: number) => ({
@@ -110,11 +115,40 @@ const elapsedTime = (source: Observable<number>) =>
 const duration = (ms: number) => (source: Observable<number>) =>
   concat(
     source.pipe(
+      elapsedTime,
       map((time) => time / ms),
       takeWhile((alpha) => alpha < 1)
     ),
     of(1)
   );
+
+export const takeDuring = (duration: number) => (source: Observable<number>) =>
+  concat(
+    source.pipe(
+      elapsedTime,
+      takeWhile((time) => time <= duration)
+    ),
+    of(duration)
+  );
+
+const distanceAtSpeed = (units: number, speed: number) =>
+  duration(units / speed);
+
+export const unitsPerSecond = (speed: number) => (source: Observable<number>) =>
+  source.pipe(map((time) => (time * speed) / 1000));
+
+export const velocity = (vect: Point, speed?: number) => {
+  const mod = speed ? Math.sqrt(vect.x * vect.x + vect.y * vect.y) : 1;
+  const v = speed
+    ? { x: (vect.x * speed) / mod, y: (vect.y * speed) / mod }
+    : vect;
+  return (source: Observable<number>) =>
+    source.pipe(
+      // deltaTime,
+      elapsedTime,
+      map((time) => ({ x: (v.x * time) / 1000, y: (v.y * time) / 1000 }))
+    );
+};
 
 /**
  * Operador que dada una secuencia de tiempos en ms, realiza un movimiento PROGRESIVO entre dos puntos dados,
@@ -123,17 +157,106 @@ const duration = (ms: number) => (source: Observable<number>) =>
  * FLUJO SALIENTE: secuencia puntos entre los extremos dados
  */
 export const movement =
-  (from: Point, to: Point, ms: number, ease: boolean) =>
+  (from: Point, to: Point, ms: number, ease: boolean = false) =>
   (source: Observable<number>) =>
     source.pipe(
       /// Implementar esta lógica en operador moveTo(this.graphic, 500, true) params: Drawable, ms, ease.
-      elapsedTime,
       duration(ms),
       // tap(a => console.log(`alpha: ${a}`)),
       map((alpha: number) => (ease ? easyGoing(alpha) : alpha)),
       // tap(a => console.log(`alpha': ${a}`)),
       map(pointsBetween(from, to))
     );
+
+export const quadraticMovement =
+  (
+    from: Point,
+    controlPoint: Point,
+    to: Point,
+    ms: number,
+    ease: boolean = false
+  ) =>
+  (source: Observable<number>) =>
+    source.pipe(
+      /// Implementar esta lógica en operador moveTo(this.graphic, 500, true) params: Drawable, ms, ease.
+      duration(ms),
+      // tap(a => console.log(`alpha: ${a}`)),
+      map((alpha: number) => (ease ? easyGoing(alpha) : alpha)),
+      // tap(a => console.log(`alpha': ${a}`)),
+      map(quadraticPoints(from, controlPoint, to))
+    );
+
+export const bezierMovement =
+  (
+    from: Point,
+    controlPoint1: Point,
+    controlPoint2: Point,
+    to: Point,
+    ms: number,
+    ease: boolean = false
+  ) =>
+  (source: Observable<number>) =>
+    source.pipe(
+      /// Implementar esta lógica en operador moveTo(this.graphic, 500, true) params: Drawable, ms, ease.
+      duration(ms),
+      // tap(a => console.log(`alpha: ${a}`)),
+      map((alpha: number) => (ease ? easyGoing(alpha) : alpha)),
+      // tap(a => console.log(`alpha': ${a}`)),
+      map(bezierPoints(from, controlPoint1, controlPoint2, to))
+    );
+
+/**
+ *
+ * Operator that given a sequence of timestamps (in ms) produce the points resulting of a movement
+ * between two given points at a given speed.
+ *
+ * INPUT STREAM: timestamps in ms.
+ * OUTPUT STREAM: sequence of points.
+ */
+export const movementAtSpeed = (
+  from: Point,
+  to: Point,
+  speed: number,
+  ease: boolean = false
+) =>
+  movement(
+    from,
+    to,
+    (1000 * Math.sqrt(squareDistance(from, to))) / speed,
+    ease
+  );
+
+export const quadraticMovementAtSpeed = (
+  from: Point,
+  controlPoint: Point,
+  to: Point,
+  speed: number,
+  ease: boolean = false
+) =>
+  quadraticMovement(
+    from,
+    controlPoint,
+    to,
+    (1000 * Math.sqrt(squareDistance(from, to))) / speed,
+    ease
+  );
+
+export const bezierMovementAtSpeed = (
+  from: Point,
+  controlPoint1: Point,
+  controlPoint2: Point,
+  to: Point,
+  speed: number,
+  ease: boolean = false
+) =>
+  bezierMovement(
+    from,
+    controlPoint1,
+    controlPoint2,
+    to,
+    (1000 * Math.sqrt(squareDistance(from, to))) / speed,
+    ease
+  );
 
 /**
  * Operador generalizado que dada una secuencia de tiempos en ms, devuelve una progresión de valores entre 0 y 1,
@@ -149,7 +272,6 @@ export const span =
   (ms: number, ease = false) =>
   (source: Observable<number>) =>
     source.pipe(
-      elapsedTime,
       duration(ms),
       // tap(a => console.log(`alpha: ${a}`)),
       map((alpha: number) => (ease ? easyGoing(alpha) : alpha))
@@ -162,6 +284,7 @@ export const EMPTY_EFFECT: CanvasEffect = { target: null, pulse: () => EMPTY };
  * Conmute effects every time a switch$ (e.g. click$, hold$, etc) event comes.
  */
 export class EffectSwitcher implements CanvasEffect {
+  public readonly applyFromOrigin = false;
   private next = 0;
   private effects: CanvasEffect[];
 
@@ -340,7 +463,8 @@ export interface Spinwise {
   spin: number;
 }
 
-export class SpinEffect implements CanvasEffect {
+// deprecated
+export class OldSpinEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
     public target: Drawable & Spinwise,
@@ -358,6 +482,66 @@ export class SpinEffect implements CanvasEffect {
   }
 }
 
+export class SpinEffect implements CanvasEffect {
+  constructor(
+    private frame$: Observable<number>,
+    public target: Drawable,
+    private period: number = 1000 // ms (negative for anticlockwise spin)
+  ) {}
+
+  pulse(): Observable<Matrix> {
+    return this.frame$.pipe(
+      deltaTime,
+      map((duration) => (2 * Math.PI * duration) / this.period),
+      map((radians) => Identity.rotate(radians))
+    );
+  }
+}
+
+export class OscillatorEffect implements CanvasEffect {
+  constructor(
+    private frame$: Observable<number>,
+    public target: Drawable,
+    private amplitude: number,
+    private horizontal: boolean = true,
+    private period: number = 1000 // ms (negative for anticlockwise spin)
+  ) {}
+
+  pulse(): Observable<Matrix> {
+    const offsetToPoint: (offset: number) => Point = this.horizontal
+      ? (offset) => ({ x: offset, y: 0 })
+      : (offset) => ({ x: 0, y: offset });
+    return this.frame$.pipe(
+      elapsedTime,
+      map((time) => (2 * Math.PI * time) / this.period), // mapTimeToRadians(period)
+      map((radians) => Math.sin(radians) * this.amplitude),
+      map(offsetToPoint),
+      deltaPoint(),
+      map((vect) => Identity.translate(vect))
+    );
+  }
+}
+
+export class FollowVectorsEffect implements CanvasEffect {
+  constructor(
+    private frame$: Observable<number>,
+    public target: Drawable,
+    private vectors: Point[],
+    private period: number = 1000
+  ) {} // ms
+
+  pulse(): Observable<Matrix> {
+    return this.frame$.pipe(
+      elapsedTime,
+      map((time) => ((time / this.period) >> 0) % this.vectors.length),
+      distinctUntilChanged(),
+      map((index) => this.vectors[index]),
+      map((vect) => Identity.translate(vect))
+    );
+  }
+}
+/// FollowPathEffect
+
 export class QuarterTurnEffect implements CanvasEffect {
   constructor(
     private engine: GraphEngine,
@@ -374,7 +558,6 @@ export class QuarterTurnEffect implements CanvasEffect {
       exhaustMap((init) =>
         this.engine.frame(this.target).pipe(
           // exhaustMap para evitar más de un proceso a la vez
-          elapsedTime,
           duration(500),
           map(easyGoing2),
           map(valuesBetween(init, init + Math.PI / 2)),
@@ -427,7 +610,6 @@ export class PickUpEffect implements CanvasEffect {
         tap(() => this.engine.bringToTop(this.target)),
         switchMap((_point) =>
           this.engine.frame(this.target).pipe(
-            elapsedTime,
             duration(500),
             map(easyGoing2),
             map(valuesBetween(1, 1.5)),
@@ -442,7 +624,6 @@ export class PickUpEffect implements CanvasEffect {
         map((_point) => this.target.elasticity), // partimos de la elasticidad previa al end$
         switchMap((max) =>
           this.engine.frame(this.target).pipe(
-            elapsedTime,
             duration(500),
             map(easyGoing2),
             map(valuesBetween(max, 1)),

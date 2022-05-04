@@ -9,11 +9,31 @@ export const ORIGIN: Point = { x: 0, y: 0 };
 
 export const valuesBetween = (from: number, to: number) => (alpha: number) =>
   from * (1 - alpha) + to * alpha;
-export const pointsBetween =
-  (origin: Point, dest: Point) => (alpha: number) => ({
-    x: origin.x * (1 - alpha) + dest.x * alpha,
-    y: origin.y * (1 - alpha) + dest.y * alpha,
-  });
+
+const pointBetween = (origin: Point, dest: Point, alpha: number) => ({
+  x: origin.x * (1 - alpha) + dest.x * alpha,
+  y: origin.y * (1 - alpha) + dest.y * alpha,
+});
+
+export const pointsBetween = (origin: Point, dest: Point) => (alpha: number) =>
+  pointBetween(origin, dest, alpha);
+
+export const quadraticPoints =
+  (origin: Point, controlPoint: Point, dest: Point) => (alpha: number) =>
+    pointBetween(
+      pointBetween(origin, controlPoint, alpha),
+      pointBetween(controlPoint, dest, alpha),
+      alpha
+    );
+
+export const bezierPoints =
+  (origin: Point, controlPoint1: Point, controlPoint2: Point, dest: Point) =>
+  (alpha: number) =>
+    quadraticPoints(
+      pointBetween(origin, controlPoint1, alpha),
+      pointBetween(controlPoint1, controlPoint2, alpha),
+      pointBetween(controlPoint2, dest, alpha)
+    )(alpha);
 
 export interface Dimension {
   width: number;
@@ -312,3 +332,15 @@ class FastHomogeneousMatrix implements Matrix {
 }
 
 export const Identity: Matrix = FastHomogeneousMatrix.identity;
+
+export const rotationMatrix: (alpha: number) => Matrix = (alpha) => {
+  const cos = Math.cos(alpha);
+  const sin = Math.sin(alpha);
+  return new FastHomogeneousMatrix(cos, sin, -sin, cos, 0, 0);
+};
+
+export const scalingMatrix: (sx: number, sy: number) => Matrix = (sx, sy) =>
+  new FastHomogeneousMatrix(sx, 0, 0, sy, 0, 0);
+
+export const translationMatrix: (point: Point) => Matrix = (point) =>
+  new FastHomogeneousMatrix(1, 0, 0, 1, point.x, point.y);
