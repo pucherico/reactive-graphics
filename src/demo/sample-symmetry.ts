@@ -1,3 +1,4 @@
+import { of } from "rxjs";
 import {
   Drawable,
   GraphObject,
@@ -8,6 +9,7 @@ import {
   PathBuilder,
   Point,
 } from "..";
+import { GraphEngine } from "../render";
 
 const X_OFFSET = 15, Y_OFFSET = -15;
 
@@ -75,4 +77,14 @@ class Graph implements GraphObject {
 }
 
 const graph = new Graph();
-export default graph;
+export default (engine: GraphEngine) => {
+  engine
+  .addObject(graph)
+  // .animate(of(Identity.translate({ x: 100, y: 0 }).scale(0.5, 1)));
+  .transform(Identity.translate({ x: 100, y: 0 }).scale(0.5, 1));
+// engine.layerTransformer(engine.currentLayer)
+//   .scale(0.5, 0.5)
+//   .rotate(-Math.PI / 4)
+//   .translate(0, 100);
+
+};
