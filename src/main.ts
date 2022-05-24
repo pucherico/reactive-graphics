@@ -17,10 +17,11 @@ import {
   PathBuilder,
   TranslateLayerEffect,
 } from ".";
+import { wave } from "./demo/graphics";
 import { grid } from "./demo/sample-grid";
 import demoSymmetry from "./demo/sample-symmetry";
 import { SpinEffect } from "./fx";
-import { scene, scene2 } from "./demo/sample-effects";
+import sampleEffects from "./demo/sample-effects";
 import { of } from "rxjs";
 
 const canvas = document.querySelector("canvas");
@@ -30,17 +31,9 @@ const engine = new GraphEngine(canvas);
 grid(engine);
 
 // scene2(engine);
-scene(engine);
+sampleEffects(engine);
 demoSymmetry(engine);
 
-const wave = PathBuilder.functionalPath(
-  (x) => 25 * Math.sin((x * 2 * Math.PI) / 100),
-  0,
-  350
-);
-
-engine.addGraphic(
-  Modeler.new().strokeStyle("pink").strokePath2D(wave.buildPath()).build()
-);
+engine.addGraphic(wave);
 engine.playEffect(new TranslateLayerEffect(engine, engine.currentLayer));
 // engine.playEffect(new SpinEffect(engine.frame$, graph1));
