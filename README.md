@@ -23,6 +23,7 @@ Another facility the library provides is _Modelling_, leveraging the Canvas API 
 
 ### Animations
 
+- Animations
 - Effects
 - Transitions
 
