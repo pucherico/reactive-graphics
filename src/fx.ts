@@ -20,6 +20,7 @@ import {
   exhaustMap,
   mergeMap,
   distinctUntilChanged,
+  pipe,
 } from "rxjs";
 import {
   valuesBetween,
@@ -50,7 +51,14 @@ const easyGoing = (alpha: number) =>
 const easyGoing2 = (alpha: number) =>
   alpha === 0 ? 0 : 1 - Math.sin(4 * Math.PI * alpha) / (4 * Math.PI * alpha);
 
+const timeToRadians = (period: number, time: number) => (2 * Math.PI * time) / period;
+
 // Observable operators
+
+export const mapTimeToRadians = (period: number) =>
+  (timeSource: Observable<number>) => timeSource.pipe(
+    map(time => timeToRadians(period, time))
+  );
 
 /**
  * operator que dada una secuencia de puntos, devuelve los incrementos (vectores) entre ambos.
@@ -278,6 +286,15 @@ export const span =
       // tap(a => console.log(`alpha': ${a}`)),
     );
 
+/**
+ * Integration of matrix transformations.
+ * Given a stream of matrixes with "delta transformations", this operator produces
+ * a stream of transformations by pre-multiplying every delta transformation
+ */
+export const integrate = () =>
+      (source: Observable<Matrix>) =>
+      source.pipe(scan((acc, m) => m.multiply(acc)));
+
 export const EMPTY_EFFECT: CanvasEffect = { target: null, pulse: () => EMPTY };
 
 /**
@@ -491,14 +508,16 @@ export class SpinEffect implements CanvasEffect {
 
   pulse(): Observable<Matrix> {
     return this.frame$.pipe(
-      deltaTime,
+      elapsedTime,
+      // deltaTime, // derivative
       map((duration) => (2 * Math.PI * duration) / this.period),
-      map((radians) => Identity.rotate(radians))
+      map((radians) => Identity.rotate(radians)),
+      // scan((acc, matrix) => matrix.multiply(acc)) // integration
     );
   }
 }
 
-export class OscillatorEffect implements CanvasEffect {
+export class BeatEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
     public target: Drawable,
@@ -517,7 +536,64 @@ export class OscillatorEffect implements CanvasEffect {
       map((radians) => Math.sin(radians) * this.amplitude),
       map(offsetToPoint),
       deltaPoint(),
-      map((vect) => Identity.translate(vect))
+      map((vect) => Identity.scale(1 + vect.x, 1 + vect.y))
+    );
+  }
+}
+
+export const beatAnimation = (frame$: Observable<number>,
+  deformCoef: number = 0.5,
+  period: number = 1000 // ms (negative for anticlockwise spin)
+) => frame$.pipe(
+  elapsedTime,
+  map((time) => (2 * Math.PI * time) / period), // mapTimeToRadians(period)
+  map((radians) => Math.sin(radians)),
+  map(offset => deformCoef * offset),
+  map((deform) => Identity.scale(1 + deform, 1 - deform))
+);
+
+/// Provisional. Mejorar cuando se cree AnimationContext
+export const oscillatorAnimation = (
+  frame$: Observable<number>, 
+  amplitude: number, 
+  horizontal: boolean = true,
+  period: number = 1000 // ms (negative for anticlockwise spin)
+  ) => {
+    const offsetToPoint: (offset: number) => Point = horizontal
+      ? (offset) => ({ x: offset, y: 0 })
+      : (offset) => ({ x: 0, y: offset });
+    return frame$.pipe(
+      elapsedTime,
+      map((time) => (2 * Math.PI * time) / period), // mapTimeToRadians(period) | map(timeToRadians(period)) (apartado // Utils: functions and operators)
+      map((radians) => Math.sin(radians) * amplitude),
+      map(offsetToPoint),
+      // deltaPoint(), // derivative
+      map((vect) => Identity.translate(vect)),
+      // scan((acc, matrix) => matrix.multiply(acc)) // integration
+    );
+  }
+
+export class OscillatorEffect implements CanvasEffect {
+  constructor(
+    private frame$: Observable<number>,
+    public target: Drawable,
+    private amplitude: number,
+    private horizontal: boolean = true,
+    private period: number = 1000 // ms (negative for anticlockwise spin)
+  ) {}
+
+  pulse(): Observable<Matrix> {
+    const offsetToPoint: (offset: number) => Point = this.horizontal
+      ? (offset) => ({ x: offset, y: 0 })
+      : (offset) => ({ x: 0, y: offset });
+    return this.frame$.pipe(
+      elapsedTime,
+      map((time) => (2 * Math.PI * time) / this.period), // mapTimeToRadians(period) | map(timeToRadians(period)) (apartado // Utils: functions and operators)
+      map((radians) => Math.sin(radians) * this.amplitude),
+      map(offsetToPoint),
+      // deltaPoint(), // derivative
+      map((vect) => Identity.translate(vect)),
+      // scan((acc, matrix) => matrix.multiply(acc)) // integration
     );
   }
 }

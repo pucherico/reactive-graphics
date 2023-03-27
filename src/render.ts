@@ -110,7 +110,8 @@ class Layer<T extends Drawable> {
     const memMatrix = this.graphMemory.get(graph);
     if (!memMatrix)
       throw new Error("Error: transform chain does not exist for graph");
-    memMatrix.transform(memIndex, matrix);
+    // memMatrix.transform(memIndex, matrix);
+    memMatrix.setTransform(memIndex, matrix);
   }
 
   leftTransformInverse(graph: T, memIndex?: number): Matrix {
@@ -256,6 +257,10 @@ class TransformChain {
 
   transform(index: number, matrix: Matrix) {
     this.chain[index] = matrix.multiply(this.chain[index]);
+  }
+
+  setTransform(index: number, matrix: Matrix) {
+    this.chain[index] = matrix;
   }
 
   getTransfom(): Matrix {
