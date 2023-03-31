@@ -40,7 +40,7 @@ import {
   GraphEngine,
   Contact,
   AnimationContext,
-} from "./render";
+} from "./engine";
 
 // const inputisNotNull = <T>(value: T | null): value is T => value !== null;
 
