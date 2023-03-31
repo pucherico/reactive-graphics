@@ -320,6 +320,21 @@ export class GraphContext {
   }
 
   animate(
+    factoryOrMatrix$: 
+      ((context: AnimationContext) => Observable<Matrix>)
+      | Observable<Matrix>,
+    applyFromOrigin = false
+  ): GraphContext {
+    if (typeof factoryOrMatrix$ === "function") {
+      const factory = factoryOrMatrix$
+      return this.animateInContext(factory, applyFromOrigin);
+    } else {
+      const matrix$ = factoryOrMatrix$;
+      return this.animateMatrix$(matrix$, applyFromOrigin);
+    }
+  }
+
+  private animateMatrix$(
     matrix$: Observable<Matrix>,
     applyFromOrigin = false
   ): GraphContext {
@@ -327,11 +342,11 @@ export class GraphContext {
     return this;
   }
 
-  animateInContext(
-    graphPulse: (graph: GraphObject, effectIndex: number) => Observable<Matrix>,
+  private animateInContext(
+    graphPulse: (context: AnimationContext) => Observable<Matrix>,
     applyFromOrigin = false
   ): GraphContext {
-    const pulse = (index: number) => graphPulse(this.graph, index);
+    const pulse = (index: number) => graphPulse(new AnimationContext(this.graph, index, this.engine));
     this.engine.animateGraphicInContext(
       this.graph,
       pulse,
@@ -351,6 +366,43 @@ export class GraphContext {
   effects(...factories: EffectFactory[]): GraphContext {
     factories.forEach((factory) => this.effect(factory));
     return this;
+  }
+}
+
+export class AnimationContext {
+
+  constructor(
+    public readonly graph: GraphObject,
+    private index: number,
+    private engine: GraphEngine
+  ) {}
+
+  get globalFrame$(): Observable<number> {
+    return this.engine.frame$;
+  }
+
+  get frame$(): Observable<number> {
+    return this.engine.frame(this.graph);
+  }
+
+  get pointer(): PointerInput {
+    return this.engine.pointer;
+  }
+
+  devicePointInContext(point: Point): Point {
+    return this.engine.pointInContext(point, this.graph, this.index);
+  }
+
+  graphPointInContext(point: Point): Point {
+    return this.engine.graphPointInContext(point, this.graph, this.index);
+  }
+
+  deviceTransformation(): Matrix {
+    return this.engine.leftTransformInverse(this.graph, this.index);
+  }
+
+  graphTransformation(): Matrix {
+    return this.engine.rightTransform(this.graph, this.index);
   }
 }
 

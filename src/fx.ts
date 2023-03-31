@@ -39,6 +39,7 @@ import {
   CanvasEffect,
   GraphEngine,
   Contact,
+  AnimationContext,
 } from "./render";
 
 // const inputisNotNull = <T>(value: T | null): value is T => value !== null;
@@ -735,26 +736,48 @@ export class MovementEffect implements CanvasEffect {
 }
 
 export const movementAnimation = (
-  graph: GraphObject,
-  index: number,
-  engine: GraphEngine,
-  start$: Observable<Point> = engine.pointer.start$
-  ) =>
-    start$.pipe(
-      engine.pointer.filterPointWithoutContact(),
-      map((point) => engine.pointInContext(point, graph, index)),
-      scan((acc, point) => ({ origin: acc.dest, dest: point }), { origin: ORIGIN, dest: ORIGIN }),
-      switchMap(({ origin, dest }) =>
-        /// context.frame$
-        engine.frame$.pipe(
-          movement(origin, dest, 500, true),
-          map((point) => translationMatrix(point)),
-        )
-      ),
-    );
+  context: AnimationContext,
+  from: Point,
+  to: Point,
+  ms: number,
+  ease: boolean = false
+) => context.frame$.pipe(
+  movement(from, to, ms, ease),
+  map((point) => translationMatrix(point)),
+);
+
+export const followPathAnimation = (
+  context: AnimationContext,
+  path$: Observable<Point> = context.pointer.start$
+) => path$.pipe(
+  context.pointer.filterPointWithoutContact(),
+  map((point) => context.devicePointInContext(point)),
+  scan((acc, point) => ({ origin: acc.dest, dest: point }), { origin: ORIGIN, dest: ORIGIN }),
+  switchMap(({ origin, dest }) => movementAnimation(context, origin, dest, 500, true))
+);
 
 // const attrContactIsNotNull = (x: { origin: Point, contact: Contact | null, point: Point }): x is { origin: Point, contact: Contact, point: Point } => x.contact !== null;
 // const attrContactIsNotNull = <T extends { contact: Contact | null }>(x: T): x is T & { contact: Contact } => x.contact !== null;
+
+export const dragAnimation = (context: AnimationContext) => context.pointer.drag$.pipe(
+  filter(
+    <T extends { contact: Contact | null }>(
+      x: T
+    ): x is T & { contact: Contact } => x.contact !== null
+  ),
+  filter(
+    ({ origin: _origin, contact, point: _point }) =>
+      contact.graph === context.graph
+  ),
+  map(({ origin, contact, point }) => ({
+    origin: context.devicePointInContext(origin),
+    contact,
+    point: {
+      ...point,
+      ...context.devicePointInContext(point),
+    },
+  }))
+);
 
 export class DragEffect implements CanvasEffect {
   public readonly pulse$: Observable<any>;
