@@ -31,7 +31,7 @@ import {
   toArray,
   take,
 } from "rxjs";
-import { Rect, Point, vector, squareDistance, Matrix, Identity } from "./geom";
+import { Rect, Point, squareDistance, Matrix, Identity } from "./geom";
 import { differential, integration } from "./rx";
 
 const CLICK_TIMEOUT = 300; // max time (ms) between start$ and end$ to be cosidered a click
@@ -44,193 +44,43 @@ export interface Drawable {
   draw(context: CanvasRenderingContext2D): void;
 }
 
-export interface Traceable {
-  position: Point;
+const extractDraw = (drawable: Drawable) => {
+  const { draw } = drawable;
+  return draw;
+};
+
+export const createGraph = (
+    drawOrDrawable: Drawable | ((context: CanvasRenderingContext2D) => void)
+): GraphObject => {
+  const draw = typeof drawOrDrawable === "function"
+    ? drawOrDrawable
+    : extractDraw(drawOrDrawable);
+  return {
+    draw,
+    maybePointInGraph: (_matrix: Matrix, _point: Point) => false,
+    isPointInGraph: (_context: CanvasDrawPath, _point: Point) => false,
+    collisionDetectionPoints: () => []
+  };
 }
 
-export interface GraphObject extends Drawable, Traceable {
-  // getBoundingRect(): Rect; /// | null
+export interface GraphObject extends Drawable {
   maybePointInGraph(matrix: Matrix, point: Point): boolean;
   isPointInGraph(context: CanvasDrawPath, point: Point): boolean; // point in device coords
   collisionDetectionPoints(): Point[]; // point coords? renombrar: checkPoints? contactPoints?
-  // getBoundaries(): Rect[]; /// deprecated?
 }
 
 /**
  * An Effect makes changes to a graph target overtime.
- * The effect starts when it is played in the RenderManager (See RenderManager.playEffect()).
- * The effect could be stopped when the graph target is removed from the RenderManager.
- * If target is null, RenderManager will never stops the effect.
+ * The effect starts when it is played in the engine (See GraphEngine.playEffect()).
+ * The effect could be stopped when the graph target is removed from the engine.
+ * If target is null, GraphEngine will never stops the effect.
  */
 export interface CanvasEffect {
-  readonly target: Drawable | null;
+  readonly target: GraphObject | null;
   pulse(effectIndex?: number): Observable<Matrix | null>; // Rendering request ticks
 }
 
-export type EffectFactory<T> = (t: T) => CanvasEffect;
-
-class Layer<T extends Drawable> {
-  protected geomMatrix: Matrix = Identity;
-  protected inveMatrix: Matrix | null = Identity; // inveMatrix?
-  protected graphics: T[] = [];
-  protected graphMatrix: Map<T, Matrix> = new Map();
-  protected graphMemory: Map<T, TransformChain> = new Map();
-
-  addGraphic(graph: T) {
-    this.graphics.push(graph);
-    this.graphMatrix.set(graph, Identity);
-    this.graphMemory.set(graph, new TransformChain());
-  }
-
-  removeGraphic(graph: T) {
-    // Destructive version
-    // const i = this.graphics.indexOf(graph);
-    // if (i !== -1) this.graphics.splice(i, 1);
-    // Immutable version
-    this.graphics = this.graphics.filter((g) => g !== graph);
-    this.graphMatrix.delete(graph);
-    this.graphMemory.delete(graph);
-  }
-
-  newMemoryMatrix(graph: T, applyFromOrigin: boolean): number {
-    const memMatrix = this.graphMemory.get(graph);
-    if (!memMatrix)
-      throw new Error("Error: transform chain does not exist for graph");
-    return memMatrix.newTransformation(applyFromOrigin);
-  }
-
-  getTransformMemory(graph: T): Matrix {
-    const memMatrix = this.graphMemory.get(graph);
-    if (!memMatrix)
-      throw new Error("Error: transform chain does not exist for graph");
-    return memMatrix.getTransfom();
-  }
-
-  transformMemory(graph: T, memIndex: number, matrix: Matrix) {
-    const memMatrix = this.graphMemory.get(graph);
-    if (!memMatrix)
-      throw new Error("Error: transform chain does not exist for graph");
-    // memMatrix.transform(memIndex, matrix);
-    memMatrix.setTransform(memIndex, matrix);
-  }
-
-  leftTransformInverse(graph: T, memIndex?: number): Matrix {
-    // (A * B * C)' = C' * B' * A'
-    if (this.inveMatrix === null) {
-      this.inveMatrix = this.geomMatrix.inverse();
-    }
-    const gmatrix = this.graphMatrix.get(graph) ?? Identity;
-    const memMatrix = this.graphMemory.get(graph);
-    if (!memMatrix)
-      throw new Error("Error: transform chain does not exist for graph");
-    const inveMem = memMatrix.leftTransformInverse(memIndex);
-    // inverse multiplication of matrices: layer, graph, effects (mem)
-    return inveMem.multiply(gmatrix.inverse()).multiply(this.inveMatrix);
-  }
-
-  rightTransform(graph: T, memIndex: number): Matrix {
-    const memMatrix = this.graphMemory.get(graph);
-    if (!memMatrix)
-      throw new Error("Error: transform chain does not exist for graph");
-    return memMatrix.rightTransform(memIndex);
-  }
-
-  bringToTop(graph: T) {
-    this.graphics.push(
-      ...this.graphics.splice(this.graphics.indexOf(graph), 1)
-    );
-  }
-
-  sendToBack(graph: T) {
-    this.graphics.unshift(
-      ...this.graphics.splice(this.graphics.indexOf(graph), 1)
-    );
-  }
-
-  scale(sx: number, sy: number) {
-    this.geomMatrix = this.geomMatrix.scale(sx, sy);
-    // this.inveMatrix = this.inveMatrix.scale(sx, sy, true);
-    this.inveMatrix = null;
-  }
-
-  rotate(alpha: number) {
-    this.geomMatrix = this.geomMatrix.rotate(alpha);
-    // this.inveMatrix = this.inveMatrix.rotate(alpha, true);
-    this.inveMatrix = null;
-  }
-
-  translate(point: Point) {
-    this.geomMatrix = this.geomMatrix.translate(point);
-    // this.inveMatrix = this.inveMatrix.translate(point, true);
-    this.inveMatrix = null;
-  }
-
-  transformLayer(matrix: Matrix) {
-    this.geomMatrix = this.geomMatrix.multiply(matrix);
-    this.inveMatrix = null;
-  }
-
-  transform(point: Point): Point {
-    return this.geomMatrix.transform(point);
-  }
-
-  inverseTransform(point: Point): Point {
-    // return this.inveMatrix.transform(point);
-    if (this.inveMatrix === null) {
-      this.inveMatrix = this.geomMatrix.inverse();
-    }
-    return this.inveMatrix.transform(point);
-  }
-
-  get geomCoefficients(): [number, number, number, number, number, number] {
-    return this.geomMatrix.coefficients;
-  }
-
-  set geomCoefficients([a, b, c, d, e, f]: [
-    number,
-    number,
-    number,
-    number,
-    number,
-    number
-  ]) {
-    this.geomMatrix.coefficients = [a, b, c, d, e, f];
-    // this.inveMatrix = this.geomMatrix.inverse();
-    this.inveMatrix = null;
-  }
-
-  getTransformGraph(graph: T): Matrix {
-    const gmatrix = this.graphMatrix.get(graph);
-    if (!gmatrix) throw new Error("graph matrix not found");
-    return gmatrix;
-  }
-
-  setTransformGraph(graph: T, matrix: Matrix) {
-    this.graphMatrix.set(graph, matrix);
-  }
-
-  transformGraph(graph: T, matrix: Matrix) {
-    const gmatrix = this.graphMatrix.get(graph);
-    if (!gmatrix) throw new Error("graph matrix not found");
-    this.graphMatrix.set(graph, gmatrix.multiply(matrix));
-  }
-
-  renderObjects(context: CanvasRenderingContext2D) {
-    context.save();
-    const [a, b, c, d, e, f] = this.geomMatrix.coefficients;
-    context.setTransform(a, b, c, d, e, f);
-    this.graphics.forEach((graph) => {
-      context.save();
-      const gmatrix = this.graphMatrix.get(graph);
-      if (gmatrix) context.transform(...gmatrix.coefficients);
-      const mmatrix = this.getTransformMemory(graph);
-      context.transform(...mmatrix.coefficients);
-      graph.draw(context);
-      context.restore();
-    });
-    context.restore();
-  }
-}
+export type EffectFactory = (graph: GraphObject) => CanvasEffect;
 
 class GraphStatus {
   public removed$: Observable<Drawable>;
@@ -416,7 +266,7 @@ interface Transformer {
 }
 
 class LayerTransformer implements Transformer {
-  constructor(private renderManager: RenderManager, private layer: number) {}
+  constructor(private engine: GraphEngine, private layer: number) {}
 
   rotate(alpha: number): Transformer {
     return this.transform(Identity.rotate(alpha));
@@ -431,12 +281,12 @@ class LayerTransformer implements Transformer {
   }
 
   private transform(matrix: Matrix): Transformer {
-    this.renderManager.transformLayer(this.layer, matrix);
+    this.engine.transformLayer(this.layer, matrix);
     return this;
   }
 }
 class GraphTransformer implements Transformer {
-  constructor(private renderManager: RenderManager, private graph: Drawable) {}
+  constructor(private engine: GraphEngine, private graph: GraphObject) {}
 
   rotate(alpha: number): Transformer {
     return this.transform(Identity.rotate(alpha));
@@ -451,7 +301,7 @@ class GraphTransformer implements Transformer {
   }
 
   private transform(matrix: Matrix): Transformer {
-    this.renderManager.transformGraph(this.graph, matrix);
+    this.engine.transformGraph(this.graph, matrix);
     return this;
   }
 }
@@ -461,456 +311,28 @@ interface ChainedEffect {
   applyFromOrigin: boolean;
 }
 
-export class RenderManager<L extends Layer<Drawable> = Layer<Drawable>> {
-  public currentLayer: number;
-  protected layerMap: Map<Drawable, number> = new Map();
-  protected layers: L[];
-  protected layerFrames: FrameManager[];
+export class GraphContext {
+  constructor(private engine: GraphEngine, public graph: GraphObject) {}
 
-  public fps$: Observable<number>; // count of frames per second rendered. This value is updated every second.
-  public status: GraphStatus = new GraphStatus();
-  private readonly frameManager: FrameManager;
-  private readonly effect$: Subject<ChainedEffect> = new Subject();
-  private effectSub: Subscription | null = null;
-  private fpsSubject?: Subject<number>;
-  private pendingRenderRequests = 0;
-
-  constructor(protected canvas: HTMLCanvasElement) {
-    this.frameManager = new FrameManager();
-    this.currentLayer = 0;
-    this.layers = [this.newLayer()];
-    this.layerFrames = [new FrameManager(this.frameManager.frame$)];
-    this.fpsSubject = new Subject<number>();
-    this.effectSub = this.effect$
-      .pipe(
-        map((chainedEffect) => ({
-          effect: chainedEffect.effect,
-          index: this.registerEffectMemory(
-            chainedEffect.effect,
-            chainedEffect.applyFromOrigin
-          ),
-        })),
-        mergeMap(({ effect, index }) =>
-          effect.pulse(index).pipe(
-            tap((matrixOrNull) => {
-              if (matrixOrNull !== null && effect.target !== null) {
-                const matrix = matrixOrNull;
-                // this.transformGraph(effect.target, matrix); ///  transformMem && use in renderObjects
-                this.transformMemory(effect.target, index, matrix);
-                /// pending case of layer effect
-                // this.transformLayer(layer, matrix);
-              }
-            }),
-            takeUntil(
-              this.status.removed$.pipe(
-                filter((graph) => graph === effect.target)
-              )
-            )
-          )
-        ),
-        auditTime(0, animationFrameScheduler) // throttleTime(0, animationFrame)
-      )
-      .subscribe(() => {
-        this.renderPhase();
-        this.fpsSubject?.next(1);
-      });
-    this.fps$ = this.fpsSubject.asObservable().pipe(
-      bufferTime(1000),
-      map((group) => group.length)
-    );
-  }
-
-  private registerEffectMemory(
-    effect: CanvasEffect,
-    applyFromOrigin: boolean
-  ): number {
-    if (effect.target === null) return -1;
-    const layer = this.layerOfGraph(effect.target);
-    return this.layers[layer].newMemoryMatrix(effect.target, applyFromOrigin);
-  }
-
-  // private transformable(effect: CanvasEffect, memIndex: number): () => Matrix {
-  //   if (effect.target !== null) {
-  //     const target = effect.target as Drawable;
-  //     const layer = this.layerOfGraph(target);
-  //     return () => this.layers[layer].getTransformMemory(target, memIndex);
-  //     // return () => this.getTransformGraph(target);
-  //   } else {
-  //     return () => Identity;
-  //   }
-  // }
-
-  get frame$() {
-    return this.frameManager.frame$;
-  }
-
-  pace(factor: number) {
-    this.frameManager.pace(factor);
-  }
-
-  currentPace(): number {
-    return this.frameManager.currentPace();
-  }
-
-  pause() {
-    this.frameManager.pause();
-  }
-
-  paused(): boolean {
-    return this.frameManager.paused();
-  }
-
-  resume() {
-    this.frameManager.resume();
-  }
-
-  sleep() {
-    this.frameManager.sleep();
-  }
-
-  asleep(): boolean {
-    return this.frameManager.asleep();
-  }
-
-  frame(graph: Drawable): Observable<number> {
-    return this.layerFrames[this.layerOfGraph(graph)].frame$;
-  }
-
-  frameOfLayer(layer: number) {
-    return this.layerFrames[layer].frame$;
-  }
-
-  protected newLayer(): L {
-    return new Layer<Drawable>() as L;
-  }
-
-  /**
-   * Release effect resources
-   */
-  destroy() {
-    if (this.effectSub !== null) {
-      this.effectSub.unsubscribe();
-      this.effectSub = null;
-      this.fpsSubject?.complete();
-    }
-  }
-
-  public nextLayer(): number {
-    this.layerFrames.push(new FrameManager(this.frameManager.frame$));
-    return (this.currentLayer = this.layers.push(this.newLayer()) - 1);
-  }
-
-  public switchLayer(layer: number) {
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    this.currentLayer = layer;
-  }
-
-  public enableLayer(layer: number) {
-    this.layerFrames[layer].resume();
-    this.requestRender();
-  }
-
-  public disableLayer(layer: number) {
-    this.layerFrames[layer].pause();
-    this.requestRender();
-  }
-
-  public layerEnabled(layer: number): boolean {
-    return !this.layerFrames[layer].paused();
-  }
-
-  /**
-   * Produce a new Effect.
-   * This method cannot be invoked before init().
-   */
-  playEffect(effect: CanvasEffect, applyFromOrigin = false) {
-    if (this.effectSub === null) {
-      throw new Error(
-        "Invalid state: You Can't add any effect before initialization."
-      );
-    }
-    this.effect$.next({ effect, applyFromOrigin });
-  }
-
-  animateGraphic(
-    graph: Drawable,
-    matrix$: Observable<Matrix>,
-    applyFromOrigin = false
-  ) {
-    const effect: CanvasEffect = { target: graph, pulse: () => matrix$ };
-    this.playEffect(effect, applyFromOrigin);
-  }
-
-  animateGraphicInContext(
-    graph: Drawable,
-    pulse: (effectIndex: number) => Observable<Matrix>,
-    applyFromOrigin = false
-  ) {
-    const effect: CanvasEffect = { target: graph, pulse };
-    this.playEffect(effect, applyFromOrigin);
-  }
-
-  addGraphic(
-    graphOrDraw: Drawable | ((context: CanvasRenderingContext2D) => void),
-    layer: number | null = null
-  ): GraphContext<Drawable> {
-    const graph =
-      typeof graphOrDraw === "function" ? { draw: graphOrDraw } : graphOrDraw;
-    // For robustness, we remove it first if graph already in engine
-    if (this.layerMap.get(graph) !== undefined) {
-      this.removeGraphic(graph);
-    }
-    const graphLayer = layer ?? this.currentLayer;
-    this.layers[graphLayer].addGraphic(graph);
-    this.layerMap.set(graph, graphLayer);
-    this.requestRender();
-    return new GraphContext(this, graph);
-  }
-
-  removeGraphic(graph: Drawable): number {
-    const layer = this.layerMap.get(graph);
-    if (layer === undefined) {
-      throw Error(`Can not remove unknown graph.`);
-    }
-    this.layers[layer].removeGraphic(graph);
-    this.layerMap.delete(graph);
-    this.status.removed(graph);
-    return layer;
-  }
-
-  bringToTop(graph: Drawable) {
-    const layer = this.layerMap.get(graph);
-    if (layer === undefined) {
-      throw Error(`Can not bring to top unknown graph.`);
-    }
-    this.layers[layer].bringToTop(graph);
-  }
-
-  sendToBack(graph: Drawable) {
-    const layer = this.layerMap.get(graph);
-    if (layer === undefined) {
-      throw Error(`Can not send to back unknown graph.`);
-    }
-    this.layers[layer].sendToBack(graph);
-  }
-
-  setTransformLayer(layer: number, matrix: Matrix) {
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    this.layers[layer].geomCoefficients = matrix.coefficients;
-  }
-
-  transformLayer(layer: number, matrix: Matrix) {
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    this.layers[layer].transformLayer(matrix);
-  }
-
-  layerTransformer(layer: number | null = null): Transformer {
-    const l = layer ?? this.currentLayer;
-    return new LayerTransformer(this, l);
-  }
-
-  layerOfGraph(graph: Drawable): number {
-    const layer = this.layerMap.get(graph);
-    if (layer === undefined) {
-      throw Error(`Can not find graph layer.`);
-    }
-    return layer;
-  }
-
-  pointInLayer(point: Point, layer: number): Point {
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    return this.layers[layer].inverseTransform(point);
-  }
-
-  pointFromLayer(point: Point, layer: number): Point {
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    return this.layers[layer].transform(point);
-  }
-
-  pointInGraphLayer(point: Point, graph: Drawable): Point {
-    const layer = this.layerMap.get(graph);
-    if (layer === undefined) {
-      throw Error(`Can not find graph layer.`);
-    }
-    return this.layers[layer].inverseTransform(point);
-  }
-
-  pointFromGraphLayer(point: Point, graph: Drawable): Point {
-    const layer = this.layerMap.get(graph);
-    if (layer === undefined) {
-      throw Error(`Can not find graph layer.`);
-    }
-    return this.layers[layer].transform(point);
-  }
-
-  pointInContext(point: Point, graph: Drawable, index?: number): Point {
-    const matrix = this.leftTransformInverse(graph, index);
-    return matrix.transform(point);
-  }
-
-  graphPointInContext(point: Point, graph: Drawable, index: number): Point {
-    return this.rightTransform(graph, index).transform(point);
-  }
-
-  rectInLayer(rect: Rect, layer: number): Rect {
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    return new Rect(
-      this.layers[layer].inverseTransform(rect.from),
-      this.layers[layer].inverseTransform(rect.to)
-    );
-  }
-
-  rectFromLayer(rect: Rect, layer: number): Rect {
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    return new Rect(
-      this.layers[layer].transform(rect.from),
-      this.layers[layer].transform(rect.to)
-    );
-  }
-
-  rectInGraphLayer(rect: Rect, graph: Drawable): Rect {
-    const layer = this.layerMap.get(graph);
-    if (layer === undefined) {
-      throw Error(`Can not find graph layer.`);
-    }
-    return new Rect(
-      this.layers[layer].inverseTransform(rect.from),
-      this.layers[layer].inverseTransform(rect.to)
-    );
-  }
-
-  rectFromGraphLayer(rect: Rect, graph: Drawable): Rect {
-    const layer = this.layerMap.get(graph);
-    if (layer === undefined) {
-      throw Error(`Can not find graph layer.`);
-    }
-    return new Rect(
-      this.layers[layer].transform(rect.from),
-      this.layers[layer].transform(rect.to)
-    );
-  }
-
-  layerGeomCoefficients(
-    layer: number
-  ): [number, number, number, number, number, number] {
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    return this.layers[layer].geomCoefficients;
-  }
-
-  setLayerGeomCoefficients(
-    layer: number,
-    [a, b, c, d, e, f]: [number, number, number, number, number, number]
-  ) {
-    if (layer < 0 || layer >= this.layers.length) {
-      throw Error(`Invalid layer ${layer}.`);
-    }
-    this.layers[layer].geomCoefficients = [a, b, c, d, e, f];
-  }
-
-  getTransformGraph(graph: Drawable): Matrix {
-    const layer = this.layerOfGraph(graph);
-    return this.layers[layer].getTransformGraph(graph);
-  }
-
-  setTransformGraph(graph: Drawable, matrix: Matrix) {
-    const layer = this.layerOfGraph(graph);
-    this.layers[layer].setTransformGraph(graph, matrix);
-  }
-
-  transformGraph(graph: Drawable, matrix: Matrix) {
-    const layer = this.layerOfGraph(graph);
-    this.layers[layer].transformGraph(graph, matrix);
-  }
-
-  graphTransformer(graph: Drawable): Transformer {
-    return new GraphTransformer(this, graph);
-  }
-
-  leftTransformInverse(graph: Drawable, memIndex?: number): Matrix {
-    const layer = this.layerOfGraph(graph);
-    return this.layers[layer].leftTransformInverse(graph, memIndex);
-  }
-
-  rightTransform(graph: Drawable, memIndex: number): Matrix {
-    const layer = this.layerOfGraph(graph);
-    return this.layers[layer].rightTransform(graph, memIndex);
-  }
-
-  transformMemory(graph: Drawable, memIndex: number, matrix: Matrix) {
-    const layer = this.layerOfGraph(graph);
-    this.layers[layer].transformMemory(graph, memIndex, matrix);
-  }
-
-  public requestRender() {
-    this.pendingRenderRequests++;
-    if (this.pendingRenderRequests === 1) {
-      requestAnimationFrame(() => {
-        this.renderPhase();
-        this.pendingRenderRequests = 0;
-      });
-    }
-  }
-
-  private renderPhase() {
-    const context = this.canvas.getContext("2d");
-    if (context !== null) {
-      this.clearCanvas(context);
-      this.renderObjects(context);
-    }
-  }
-
-  private clearCanvas(context: CanvasRenderingContext2D) {
-    context.fillStyle = "black";
-    context.fillRect(0, 0, this.canvas.width, this.canvas.height);
-  }
-
-  private renderObjects(context: CanvasRenderingContext2D) {
-    this.layers
-      .map((layer, index) => ({ layer, enabled: this.layerEnabled(index) }))
-      .filter(({ enabled }) => enabled)
-      .map(({ layer }) => layer)
-      .forEach((layer) => layer.renderObjects(context));
-  }
-}
-
-export class GraphContext<T extends Drawable> {
-  constructor(private renderManager: RenderManager, public graph: T) {}
-
-  transform(matrix: Matrix): GraphContext<T> {
-    this.renderManager.transformGraph(this.graph, matrix);
+  transform(matrix: Matrix): GraphContext {
+    this.engine.transformGraph(this.graph, matrix);
     return this;
   }
 
   animate(
     matrix$: Observable<Matrix>,
     applyFromOrigin = false
-  ): GraphContext<T> {
-    this.renderManager.animateGraphic(this.graph, matrix$, applyFromOrigin);
+  ): GraphContext {
+    this.engine.animateGraphic(this.graph, matrix$, applyFromOrigin);
     return this;
   }
 
   animateInContext(
-    graphPulse: (graph: T, effectIndex: number) => Observable<Matrix>,
+    graphPulse: (graph: GraphObject, effectIndex: number) => Observable<Matrix>,
     applyFromOrigin = false
-  ): GraphContext<T> {
+  ): GraphContext {
     const pulse = (index: number) => graphPulse(this.graph, index);
-    this.renderManager.animateGraphicInContext(
+    this.engine.animateGraphicInContext(
       this.graph,
       pulse,
       applyFromOrigin
@@ -919,14 +341,14 @@ export class GraphContext<T extends Drawable> {
   }
 
   effect(
-    factory: EffectFactory<T>,
+    factory: EffectFactory,
     applyFromOrigin: boolean = false
-  ): GraphContext<T> {
-    this.renderManager.playEffect(factory(this.graph), applyFromOrigin);
+  ): GraphContext {
+    this.engine.playEffect(factory(this.graph), applyFromOrigin);
     return this;
   }
 
-  effects(...factories: EffectFactory<T>[]): GraphContext<T> {
+  effects(...factories: EffectFactory[]): GraphContext {
     factories.forEach((factory) => this.effect(factory));
     return this;
   }
@@ -1292,30 +714,178 @@ export class PointerInput {
   }
 }
 
-class CollisionLayer extends Layer<GraphObject> {
-  private objects: GraphObject[] = [];
+class Layer {
+  protected geomMatrix: Matrix = Identity;
+  protected inveMatrix: Matrix | null = Identity; // inveMatrix?
+  protected graphics: GraphObject[] = [];
+  protected graphMatrix: Map<GraphObject, Matrix> = new Map();
+  protected graphMemory: Map<GraphObject, TransformChain> = new Map();
 
-  addObject(graph: GraphObject) {
-    this.objects.push(graph);
+  addGraphic(graph: GraphObject) {
+    this.graphics.push(graph);
+    this.graphMatrix.set(graph, Identity);
+    this.graphMemory.set(graph, new TransformChain());
   }
 
-  removeObject(graph: GraphObject) {
-    this.objects = this.objects.filter((g) => g !== graph);
+  removeGraphic(graph: GraphObject) {
+    // Destructive version
+    // const i = this.graphics.indexOf(graph);
+    // if (i !== -1) this.graphics.splice(i, 1);
+    // Immutable version
+    this.graphics = this.graphics.filter((g) => g !== graph);
+    this.graphMatrix.delete(graph);
+    this.graphMemory.delete(graph);
+  }
+
+  newMemoryMatrix(graph: GraphObject, applyFromOrigin: boolean): number {
+    const memMatrix = this.graphMemory.get(graph);
+    if (!memMatrix)
+      throw new Error("Error: transform chain does not exist for graph");
+    return memMatrix.newTransformation(applyFromOrigin);
+  }
+
+  getTransformMemory(graph: GraphObject): Matrix {
+    const memMatrix = this.graphMemory.get(graph);
+    if (!memMatrix)
+      throw new Error("Error: transform chain does not exist for graph");
+    return memMatrix.getTransfom();
+  }
+
+  transformMemory(graph: GraphObject, memIndex: number, matrix: Matrix) {
+    const memMatrix = this.graphMemory.get(graph);
+    if (!memMatrix)
+      throw new Error("Error: transform chain does not exist for graph");
+    // memMatrix.transform(memIndex, matrix);
+    memMatrix.setTransform(memIndex, matrix);
+  }
+
+  leftTransformInverse(graph: GraphObject, memIndex?: number): Matrix {
+    // (A * B * C)' = C' * B' * A'
+    if (this.inveMatrix === null) {
+      this.inveMatrix = this.geomMatrix.inverse();
+    }
+    const gmatrix = this.graphMatrix.get(graph) ?? Identity;
+    const memMatrix = this.graphMemory.get(graph);
+    if (!memMatrix)
+      throw new Error("Error: transform chain does not exist for graph");
+    const inveMem = memMatrix.leftTransformInverse(memIndex);
+    // inverse multiplication of matrices: layer, graph, effects (mem)
+    return inveMem.multiply(gmatrix.inverse()).multiply(this.inveMatrix);
+  }
+
+  rightTransform(graph: GraphObject, memIndex: number): Matrix {
+    const memMatrix = this.graphMemory.get(graph);
+    if (!memMatrix)
+      throw new Error("Error: transform chain does not exist for graph");
+    return memMatrix.rightTransform(memIndex);
+  }
+
+  bringToTop(graph: GraphObject) {
+    this.graphics.push(
+      ...this.graphics.splice(this.graphics.indexOf(graph), 1)
+    );
+  }
+
+  sendToBack(graph: GraphObject) {
+    this.graphics.unshift(
+      ...this.graphics.splice(this.graphics.indexOf(graph), 1)
+    );
+  }
+
+  scale(sx: number, sy: number) {
+    this.geomMatrix = this.geomMatrix.scale(sx, sy);
+    // this.inveMatrix = this.inveMatrix.scale(sx, sy, true);
+    this.inveMatrix = null;
+  }
+
+  rotate(alpha: number) {
+    this.geomMatrix = this.geomMatrix.rotate(alpha);
+    // this.inveMatrix = this.inveMatrix.rotate(alpha, true);
+    this.inveMatrix = null;
+  }
+
+  translate(point: Point) {
+    this.geomMatrix = this.geomMatrix.translate(point);
+    // this.inveMatrix = this.inveMatrix.translate(point, true);
+    this.inveMatrix = null;
+  }
+
+  transformLayer(matrix: Matrix) {
+    this.geomMatrix = this.geomMatrix.multiply(matrix);
+    this.inveMatrix = null;
+  }
+
+  transform(point: Point): Point {
+    return this.geomMatrix.transform(point);
+  }
+
+  inverseTransform(point: Point): Point {
+    // return this.inveMatrix.transform(point);
+    if (this.inveMatrix === null) {
+      this.inveMatrix = this.geomMatrix.inverse();
+    }
+    return this.inveMatrix.transform(point);
+  }
+
+  get geomCoefficients(): [number, number, number, number, number, number] {
+    return this.geomMatrix.coefficients;
+  }
+
+  set geomCoefficients([a, b, c, d, e, f]: [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number
+  ]) {
+    this.geomMatrix.coefficients = [a, b, c, d, e, f];
+    // this.inveMatrix = this.geomMatrix.inverse();
+    this.inveMatrix = null;
+  }
+
+  getTransformGraph(graph: GraphObject): Matrix {
+    const gmatrix = this.graphMatrix.get(graph);
+    if (!gmatrix) throw new Error("graph matrix not found");
+    return gmatrix;
+  }
+
+  setTransformGraph(graph: GraphObject, matrix: Matrix) {
+    this.graphMatrix.set(graph, matrix);
+  }
+
+  transformGraph(graph: GraphObject, matrix: Matrix) {
+    const gmatrix = this.graphMatrix.get(graph);
+    if (!gmatrix) throw new Error("graph matrix not found");
+    this.graphMatrix.set(graph, gmatrix.multiply(matrix));
+  }
+
+  renderObjects(context: CanvasRenderingContext2D) {
+    context.save();
+    const [a, b, c, d, e, f] = this.geomMatrix.coefficients;
+    context.setTransform(a, b, c, d, e, f);
+    this.graphics.forEach((graph) => {
+      context.save();
+      const gmatrix = this.graphMatrix.get(graph);
+      if (gmatrix) context.transform(...gmatrix.coefficients);
+      const mmatrix = this.getTransformMemory(graph);
+      context.transform(...mmatrix.coefficients);
+      graph.draw(context);
+      context.restore();
+    });
+    context.restore();
   }
 
   checkContact(point: Point): Observable<Contact> {
     // transforming point from device coordinates to (world) layer coordinates
     const layerPoint = this.inverseTransform(point);
     return this.checkCollisionPoint(layerPoint).pipe(
-      map((graph) => ({
-        graph,
-        vector: vector(graph.position, layerPoint),
-      }))
+      map((graph) => ({ graph, vector: layerPoint }))
     );
   }
 
   checkCollision(graph: GraphObject): Observable<GraphObject> {
-    const objects = this.objects;
+    const objects = this.graphics;
     return range(0, objects.length).pipe(
       map((i) => objects[i]),
       filter((g) => g !== graph),
@@ -1330,10 +900,10 @@ class CollisionLayer extends Layer<GraphObject> {
 
   checkCollisions(): Observable<[GraphObject, GraphObject]> {
     // NOTA IMPORTANTE:
-    // Evitamos usar this.objects dentro de los operadores para asegurar DENTRO del flujo
+    // Evitamos usar this.graphics dentro de los operadores para asegurar DENTRO del flujo
     // que el array es inmutable (por si se elimina objeto en respuesta a colisión):
-    const objects = this.objects;
-    const n = this.objects.length;
+    const objects = this.graphics;
+    const n = objects.length;
 
     return range(0, n).pipe(
       mergeMap((i) => range(0, i).pipe(map((j) => [i, j]))),
@@ -1352,7 +922,7 @@ class CollisionLayer extends Layer<GraphObject> {
 
   // check graph collisions with the given point (in layer coord.)
   private checkCollisionPoint(point: Point): Observable<GraphObject> {
-    return from(this.objects).pipe(
+    return from(this.graphics).pipe(
       // Evitamos usar coordenadas del dispositivo (this.geomMatrix.multiply(gmatrix)
       // por motivos de eficiencia ya que todos los objetos pertenecen al mismo layer
       map((graph) => ({
@@ -1409,15 +979,68 @@ class CollisionLayer extends Layer<GraphObject> {
   }
 }
 
-export class GraphEngine
-  extends RenderManager<CollisionLayer>
-  implements ContactDetection, CollisionDetection
-{
+export class GraphEngine implements ContactDetection, CollisionDetection {
+  public currentLayer: number;
+  protected layerMap: Map<Drawable, number> = new Map();
+  protected layers: Layer[];
+  protected layerFrames: FrameManager[];
+
+  public fps$: Observable<number>; // count of frames per second rendered. This value is updated every second.
+  public status: GraphStatus = new GraphStatus();
+  private readonly frameManager: FrameManager;
+  private readonly effect$: Subject<ChainedEffect> = new Subject();
+  private effectSub: Subscription | null = null;
+  private fpsSubject?: Subject<number>;
+  private pendingRenderRequests = 0;
+
   public readonly pointer: PointerInput;
   public readonly collision$: Observable<[GraphObject, GraphObject]>;
 
   constructor(public readonly canvas: HTMLCanvasElement) {
-    super(canvas);
+    this.frameManager = new FrameManager();
+    this.currentLayer = 0;
+    const newLayer = new Layer();
+    this.layers = [newLayer];
+    this.layerFrames = [new FrameManager(this.frameManager.frame$)];
+    this.fpsSubject = new Subject<number>();
+    this.effectSub = this.effect$
+      .pipe(
+        map((chainedEffect) => ({
+          effect: chainedEffect.effect,
+          index: this.registerEffectMemory(
+            chainedEffect.effect,
+            chainedEffect.applyFromOrigin
+          ),
+        })),
+        mergeMap(({ effect, index }) =>
+          effect.pulse(index).pipe(
+            tap((matrixOrNull) => {
+              if (matrixOrNull !== null && effect.target !== null) {
+                const matrix = matrixOrNull;
+                // this.transformGraph(effect.target, matrix); ///  transformMem && use in renderObjects
+                this.transformMemory(effect.target, index, matrix);
+                /// pending case of layer effect
+                // this.transformLayer(layer, matrix);
+              }
+            }),
+            takeUntil(
+              this.status.removed$.pipe(
+                filter((graph) => graph === effect.target)
+              )
+            )
+          )
+        ),
+        auditTime(0, animationFrameScheduler) // throttleTime(0, animationFrame)
+      )
+      .subscribe(() => {
+        this.renderPhase();
+        this.fpsSubject?.next(1);
+      });
+    this.fps$ = this.fpsSubject.asObservable().pipe(
+      bufferTime(1000),
+      map((group) => group.length)
+    );
+
     this.pointer = new PointerInput(this.canvas, this);
     this.collision$ = this.frame$.pipe(
       // auditTime(100) o throttleTime(1000), // Para dar tiempo y poder tracear detección de colisiones
@@ -1431,38 +1054,369 @@ export class GraphEngine
     );
   }
 
-  protected newLayer(): CollisionLayer {
-    return new CollisionLayer();
+  private registerEffectMemory(
+    effect: CanvasEffect,
+    applyFromOrigin: boolean
+  ): number {
+    if (effect.target === null) return -1;
+    const layer = this.layerOfGraph(effect.target);
+    return this.layers[layer].newMemoryMatrix(effect.target, applyFromOrigin);
+  }
+
+  // private transformable(effect: CanvasEffect, memIndex: number): () => Matrix {
+  //   if (effect.target !== null) {
+  //     const target = effect.target as Drawable;
+  //     const layer = this.layerOfGraph(target);
+  //     return () => this.layers[layer].getTransformMemory(target, memIndex);
+  //     // return () => this.getTransformGraph(target);
+  //   } else {
+  //     return () => Identity;
+  //   }
+  // }
+
+  get frame$() {
+    return this.frameManager.frame$;
+  }
+
+  pace(factor: number) {
+    this.frameManager.pace(factor);
+  }
+
+  currentPace(): number {
+    return this.frameManager.currentPace();
+  }
+
+  pause() {
+    this.frameManager.pause();
+  }
+
+  paused(): boolean {
+    return this.frameManager.paused();
+  }
+
+  resume() {
+    this.frameManager.resume();
+  }
+
+  sleep() {
+    this.frameManager.sleep();
+  }
+
+  asleep(): boolean {
+    return this.frameManager.asleep();
+  }
+
+  frame(graph: Drawable): Observable<number> {
+    return this.layerFrames[this.layerOfGraph(graph)].frame$;
+  }
+
+  frameOfLayer(layer: number) {
+    return this.layerFrames[layer].frame$;
+  }
+
+  /**
+   * Release effect resources
+   */
+  destroy() {
+    if (this.effectSub !== null) {
+      this.effectSub.unsubscribe();
+      this.effectSub = null;
+      this.fpsSubject?.complete();
+    }
   }
 
   public nextLayer(): number {
-    return super.nextLayer();
+    this.layerFrames.push(new FrameManager(this.frameManager.frame$));
+    const newLayer = new Layer();
+    return (this.currentLayer = this.layers.push(newLayer) - 1);
   }
 
-  addObject(
+  public switchLayer(layer: number) {
+    if (layer < 0 || layer >= this.layers.length) {
+      throw Error(`Invalid layer ${layer}.`);
+    }
+    this.currentLayer = layer;
+  }
+
+  public enableLayer(layer: number) {
+    this.layerFrames[layer].resume();
+    this.requestRender();
+  }
+
+  public disableLayer(layer: number) {
+    this.layerFrames[layer].pause();
+    this.requestRender();
+  }
+
+  public layerEnabled(layer: number): boolean {
+    return !this.layerFrames[layer].paused();
+  }
+
+  /**
+   * Produce a new Effect.
+   * This method cannot be invoked before init().
+   */
+  playEffect(effect: CanvasEffect, applyFromOrigin = false) {
+    if (this.effectSub === null) {
+      throw new Error(
+        "Invalid state: You Can't add any effect before initialization."
+      );
+    }
+    this.effect$.next({ effect, applyFromOrigin });
+  }
+
+  animateGraphic(
     graph: GraphObject,
+    matrix$: Observable<Matrix>,
+    applyFromOrigin = false
+  ) {
+    const effect: CanvasEffect = { target: graph, pulse: () => matrix$ };
+    this.playEffect(effect, applyFromOrigin);
+  }
+
+  animateGraphicInContext(
+    graph: GraphObject,
+    pulse: (effectIndex: number) => Observable<Matrix>,
+    applyFromOrigin = false
+  ) {
+    const effect: CanvasEffect = { target: graph, pulse };
+    this.playEffect(effect, applyFromOrigin);
+  }
+
+  addGraphic(
+    graphOrDraw: GraphObject | ((context: CanvasRenderingContext2D) => void),
     layer: number | null = null
-  ): GraphContext<Drawable> {
+  ): GraphContext {
+    const graph =
+      typeof graphOrDraw === "function" ? createGraph(graphOrDraw) : graphOrDraw;
     // For robustness, we remove it first if graph already in engine
     if (this.layerMap.get(graph) !== undefined) {
-      this.removeObject(graph);
+      this.removeGraphic(graph);
     }
     const graphLayer = layer ?? this.currentLayer;
-    const context = super.addGraphic(graph, graphLayer);
-    this.layers[graphLayer].addObject(graph);
-    return context;
+    this.layers[graphLayer].addGraphic(graph);
+    this.layerMap.set(graph, graphLayer);
+    this.requestRender();
+    return new GraphContext(this, graph);
   }
 
-  // redefinición para evitar que un cliente por error añada como objeto y elimine como gráfico
-  // (dejando intacto la lista de boundaries)
-  // removeGraphic(graph: GraphObject): number {
-  //   return this.removeObject(graph);
-  // }
-
-  removeObject(graph: GraphObject): number {
-    const layer = super.removeGraphic(graph);
-    this.layers[layer].removeObject(graph);
+  removeGraphic(graph: GraphObject): number {
+    const layer = this.layerMap.get(graph);
+    if (layer === undefined) {
+      throw Error(`Can not remove unknown graph.`);
+    }
+    this.layers[layer].removeGraphic(graph);
+    this.layerMap.delete(graph);
+    this.status.removed(graph);
     return layer;
+  }
+
+  bringToTop(graph: GraphObject) {
+    const layer = this.layerMap.get(graph);
+    if (layer === undefined) {
+      throw Error(`Can not bring to top unknown graph.`);
+    }
+    this.layers[layer].bringToTop(graph);
+  }
+
+  sendToBack(graph: GraphObject) {
+    const layer = this.layerMap.get(graph);
+    if (layer === undefined) {
+      throw Error(`Can not send to back unknown graph.`);
+    }
+    this.layers[layer].sendToBack(graph);
+  }
+
+  setTransformLayer(layer: number, matrix: Matrix) {
+    if (layer < 0 || layer >= this.layers.length) {
+      throw Error(`Invalid layer ${layer}.`);
+    }
+    this.layers[layer].geomCoefficients = matrix.coefficients;
+  }
+
+  transformLayer(layer: number, matrix: Matrix) {
+    if (layer < 0 || layer >= this.layers.length) {
+      throw Error(`Invalid layer ${layer}.`);
+    }
+    this.layers[layer].transformLayer(matrix);
+  }
+
+  layerTransformer(layer: number | null = null): Transformer {
+    const l = layer ?? this.currentLayer;
+    return new LayerTransformer(this, l);
+  }
+
+  layerOfGraph(graph: Drawable): number {
+    const layer = this.layerMap.get(graph);
+    if (layer === undefined) {
+      throw Error(`Can not find graph layer.`);
+    }
+    return layer;
+  }
+
+  pointInLayer(point: Point, layer: number): Point {
+    if (layer < 0 || layer >= this.layers.length) {
+      throw Error(`Invalid layer ${layer}.`);
+    }
+    return this.layers[layer].inverseTransform(point);
+  }
+
+  pointFromLayer(point: Point, layer: number): Point {
+    if (layer < 0 || layer >= this.layers.length) {
+      throw Error(`Invalid layer ${layer}.`);
+    }
+    return this.layers[layer].transform(point);
+  }
+
+  pointInGraphLayer(point: Point, graph: Drawable): Point {
+    const layer = this.layerMap.get(graph);
+    if (layer === undefined) {
+      throw Error(`Can not find graph layer.`);
+    }
+    return this.layers[layer].inverseTransform(point);
+  }
+
+  pointFromGraphLayer(point: Point, graph: Drawable): Point {
+    const layer = this.layerMap.get(graph);
+    if (layer === undefined) {
+      throw Error(`Can not find graph layer.`);
+    }
+    return this.layers[layer].transform(point);
+  }
+
+  pointInContext(point: Point, graph: GraphObject, index?: number): Point {
+    const matrix = this.leftTransformInverse(graph, index);
+    return matrix.transform(point);
+  }
+
+  graphPointInContext(point: Point, graph: GraphObject, index: number): Point {
+    return this.rightTransform(graph, index).transform(point);
+  }
+
+  rectInLayer(rect: Rect, layer: number): Rect {
+    if (layer < 0 || layer >= this.layers.length) {
+      throw Error(`Invalid layer ${layer}.`);
+    }
+    return new Rect(
+      this.layers[layer].inverseTransform(rect.from),
+      this.layers[layer].inverseTransform(rect.to)
+    );
+  }
+
+  rectFromLayer(rect: Rect, layer: number): Rect {
+    if (layer < 0 || layer >= this.layers.length) {
+      throw Error(`Invalid layer ${layer}.`);
+    }
+    return new Rect(
+      this.layers[layer].transform(rect.from),
+      this.layers[layer].transform(rect.to)
+    );
+  }
+
+  rectInGraphLayer(rect: Rect, graph: Drawable): Rect {
+    const layer = this.layerMap.get(graph);
+    if (layer === undefined) {
+      throw Error(`Can not find graph layer.`);
+    }
+    return new Rect(
+      this.layers[layer].inverseTransform(rect.from),
+      this.layers[layer].inverseTransform(rect.to)
+    );
+  }
+
+  rectFromGraphLayer(rect: Rect, graph: Drawable): Rect {
+    const layer = this.layerMap.get(graph);
+    if (layer === undefined) {
+      throw Error(`Can not find graph layer.`);
+    }
+    return new Rect(
+      this.layers[layer].transform(rect.from),
+      this.layers[layer].transform(rect.to)
+    );
+  }
+
+  layerGeomCoefficients(
+    layer: number
+  ): [number, number, number, number, number, number] {
+    if (layer < 0 || layer >= this.layers.length) {
+      throw Error(`Invalid layer ${layer}.`);
+    }
+    return this.layers[layer].geomCoefficients;
+  }
+
+  setLayerGeomCoefficients(
+    layer: number,
+    [a, b, c, d, e, f]: [number, number, number, number, number, number]
+  ) {
+    if (layer < 0 || layer >= this.layers.length) {
+      throw Error(`Invalid layer ${layer}.`);
+    }
+    this.layers[layer].geomCoefficients = [a, b, c, d, e, f];
+  }
+
+  getTransformGraph(graph: GraphObject): Matrix {
+    const layer = this.layerOfGraph(graph);
+    return this.layers[layer].getTransformGraph(graph);
+  }
+
+  setTransformGraph(graph: GraphObject, matrix: Matrix) {
+    const layer = this.layerOfGraph(graph);
+    this.layers[layer].setTransformGraph(graph, matrix);
+  }
+
+  transformGraph(graph: GraphObject, matrix: Matrix) {
+    const layer = this.layerOfGraph(graph);
+    this.layers[layer].transformGraph(graph, matrix);
+  }
+
+  graphTransformer(graph: GraphObject): Transformer {
+    return new GraphTransformer(this, graph);
+  }
+
+  leftTransformInverse(graph: GraphObject, memIndex?: number): Matrix {
+    const layer = this.layerOfGraph(graph);
+    return this.layers[layer].leftTransformInverse(graph, memIndex);
+  }
+
+  rightTransform(graph: GraphObject, memIndex: number): Matrix {
+    const layer = this.layerOfGraph(graph);
+    return this.layers[layer].rightTransform(graph, memIndex);
+  }
+
+  transformMemory(graph: GraphObject, memIndex: number, matrix: Matrix) {
+    const layer = this.layerOfGraph(graph);
+    this.layers[layer].transformMemory(graph, memIndex, matrix);
+  }
+
+  public requestRender() {
+    this.pendingRenderRequests++;
+    if (this.pendingRenderRequests === 1) {
+      requestAnimationFrame(() => {
+        this.renderPhase();
+        this.pendingRenderRequests = 0;
+      });
+    }
+  }
+
+  private renderPhase() {
+    const context = this.canvas.getContext("2d");
+    if (context !== null) {
+      this.clearCanvas(context);
+      this.renderObjects(context);
+    }
+  }
+
+  private clearCanvas(context: CanvasRenderingContext2D) {
+    context.fillStyle = "black";
+    context.fillRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  private renderObjects(context: CanvasRenderingContext2D) {
+    this.layers
+      .map((layer, index) => ({ layer, enabled: this.layerEnabled(index) }))
+      .filter(({ enabled }) => enabled)
+      .map(({ layer }) => layer)
+      .forEach((layer) => layer.renderObjects(context));
   }
 
   checkContact(point: Point): Observable<Contact> {

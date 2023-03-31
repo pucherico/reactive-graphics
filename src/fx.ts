@@ -20,7 +20,6 @@ import {
   exhaustMap,
   mergeMap,
   distinctUntilChanged,
-  pipe,
 } from "rxjs";
 import {
   valuesBetween,
@@ -33,10 +32,9 @@ import {
   squareDistance,
   quadraticPoints,
   bezierPoints,
+  translationMatrix,
 } from "./geom";
 import {
-  Drawable,
-  Traceable,
   GraphObject,
   CanvasEffect,
   GraphEngine,
@@ -331,7 +329,7 @@ export class EffectSwitcher implements CanvasEffect {
 
 /// TODO Renombrar a DragLayerEffect?
 export class TranslateLayerEffect implements CanvasEffect {
-  public readonly target: Drawable | null = null;
+  public readonly target: GraphObject | null = null;
   public readonly pulse$: Observable<any>;
 
   constructor(
@@ -366,7 +364,7 @@ export class TranslateLayerEffect implements CanvasEffect {
 }
 
 export class ShiftLayerEffect implements CanvasEffect {
-  public readonly target: Drawable | null = null;
+  public readonly target: GraphObject | null = null;
   public readonly pulse$: Observable<any>;
   protected readonly delta$: Observable<{ delta: Point; last: Point }>;
 
@@ -407,7 +405,7 @@ export class ShiftLayerEffect implements CanvasEffect {
 }
 
 export class FocusLayerEffect implements CanvasEffect {
-  public readonly target: Drawable | null = null;
+  public readonly target: GraphObject | null = null;
   public readonly pulse$: Observable<any>;
 
   constructor(
@@ -450,8 +448,8 @@ export class FocusLayerEffect implements CanvasEffect {
 }
 
 export class MoveGraphEffect implements CanvasEffect {
-  public readonly target: Drawable | null = null;
-  public readonly pulse$: Observable<any>;
+  public readonly target: GraphObject | null = null;
+  public readonly pulse$: Observable<Matrix>;
 
   constructor(
     engine: GraphEngine,
@@ -460,11 +458,11 @@ export class MoveGraphEffect implements CanvasEffect {
     ease = true
   ) {
     this.pulse$ = graphMove$.pipe(
-      map(({ graph, dest }) => ({ graph, origin: graph.position, dest })),
-      mergeMap(({ graph, origin, dest }) =>
+      mergeMap(({ graph, dest }) =>
         engine.frame(graph).pipe(
-          movement(origin, dest, ms, ease),
-          tap((point) => (graph.position = point))
+          movement(ORIGIN, dest, ms, ease),
+          // tap((point) => (graph.position = point))
+          map((point) => translationMatrix(point))
         )
       ),
       share()
@@ -484,7 +482,7 @@ export interface Spinwise {
 export class OldSpinEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
-    public target: Drawable & Spinwise,
+    public target: GraphObject & Spinwise,
     private clockwise = true
   ) {}
 
@@ -502,7 +500,7 @@ export class OldSpinEffect implements CanvasEffect {
 export class SpinEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
-    public target: Drawable,
+    public target: GraphObject,
     private period: number = 1000 // ms (negative for anticlockwise spin)
   ) {}
 
@@ -520,7 +518,7 @@ export class SpinEffect implements CanvasEffect {
 export class BeatEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
-    public target: Drawable,
+    public target: GraphObject,
     private amplitude: number,
     private horizontal: boolean = true,
     private period: number = 1000 // ms (negative for anticlockwise spin)
@@ -576,7 +574,7 @@ export const oscillatorAnimation = (
 export class OscillatorEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
-    public target: Drawable,
+    public target: GraphObject,
     private amplitude: number,
     private horizontal: boolean = true,
     private period: number = 1000 // ms (negative for anticlockwise spin)
@@ -601,7 +599,7 @@ export class OscillatorEffect implements CanvasEffect {
 export class FollowVectorsEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
-    public target: Drawable,
+    public target: GraphObject,
     private vectors: Point[],
     private period: number = 1000
   ) {} // ms
@@ -652,7 +650,7 @@ export interface Elastic {
 export class ElasticEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
-    public target: Drawable & Elastic
+    public target: GraphObject & Elastic
   ) {}
 
   pulse(): Observable<any> {
@@ -711,10 +709,11 @@ export class PickUpEffect implements CanvasEffect {
   }
 }
 
+// OBSOLETO
 export class MovementEffect implements CanvasEffect {
   constructor(
     private engine: GraphEngine,
-    public target: Drawable & Traceable,
+    public target: GraphObject,
     private start$ = engine.pointer.start$
   ) {}
 
@@ -723,17 +722,36 @@ export class MovementEffect implements CanvasEffect {
     return this.start$.pipe(
       this.engine.pointer.filterPointWithoutContact(),
       map((point) => this.engine.pointInGraphLayer(point, this.target)), // coord transformation
-      map((point) => [this.target.position, point] as [Point, Point]),
-      switchMap(([origin, dest]: [Point, Point]) =>
+      scan((acc, point) => ({ origin: acc.dest, dest: point }), { origin: ORIGIN, dest: ORIGIN }),
+      switchMap(({ origin, dest }) =>
         frame$.pipe(
           movement(origin, dest, 500, true),
-          tap((point) => (this.target.position = point))
+          map((point) => translationMatrix(point)),
         )
       ),
       share()
     );
   }
 }
+
+export const movementAnimation = (
+  graph: GraphObject,
+  index: number,
+  engine: GraphEngine,
+  start$: Observable<Point> = engine.pointer.start$
+  ) =>
+    start$.pipe(
+      engine.pointer.filterPointWithoutContact(),
+      map((point) => engine.pointInContext(point, graph, index)),
+      scan((acc, point) => ({ origin: acc.dest, dest: point }), { origin: ORIGIN, dest: ORIGIN }),
+      switchMap(({ origin, dest }) =>
+        /// context.frame$
+        engine.frame$.pipe(
+          movement(origin, dest, 500, true),
+          map((point) => translationMatrix(point)),
+        )
+      ),
+    );
 
 // const attrContactIsNotNull = (x: { origin: Point, contact: Contact | null, point: Point }): x is { origin: Point, contact: Contact, point: Point } => x.contact !== null;
 // const attrContactIsNotNull = <T extends { contact: Contact | null }>(x: T): x is T & { contact: Contact } => x.contact !== null;
@@ -775,7 +793,8 @@ export class DragEffect implements CanvasEffect {
     );
     this.pulse$ = this.drag$.pipe(
       map(({ contact, point }) => vector(contact.vector, point)),
-      tap((position) => (this.target.position = position)),
+      // tap((position) => (this.target.position = position)),
+      map((position) => translationMatrix(position)),
       share()
     );
     this.drop$ = this.drag$.pipe(
