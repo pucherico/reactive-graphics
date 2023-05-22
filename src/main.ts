@@ -1,9 +1,39 @@
-import './style.css'
+import "./style.css";
 
-const app = document.querySelector<HTMLDivElement>('#app')!
+const app = document.querySelector<HTMLDivElement>("#app")!;
 
 app.innerHTML = `
-  <h1>Hello Reactive Graphics!</h1>
-  <pre>This is just a library (not a webapp)</pre>
-  <p>Have a look at the <a href="https://github.com/pucherico/reactive-graphics">GitHub repo</a>.</p>
-`
+<h1>Simple Reactive Graphics demo</h1>
+<div class="container">
+<canvas width="500" height="500"></canvas>
+<p>Drag me</p>
+</div>
+`;
+
+import {
+  GraphEngine,
+  Identity,
+  Modeler,
+  PathBuilder,
+  TranslateLayerEffect,
+} from ".";
+import { wave } from "./demo/graphics";
+import { grid } from "./demo/sample-grid";
+import demoSymmetry from "./demo/sample-symmetry";
+import { SpinEffect } from "./fx";
+import sampleEffects from "./demo/sample-effects";
+import { of } from "rxjs";
+
+const canvas = document.querySelector("canvas");
+if (!canvas) throw new Error("canvas not found");
+const engine = new GraphEngine(canvas);
+
+grid(engine);
+// engine.playEffect(new TranslateLayerEffect(engine, engine.currentLayer));
+
+// scene2(engine);
+sampleEffects(engine);
+// demoSymmetry(engine); // graph object
+
+// engine.addGraphic(wave);
+
