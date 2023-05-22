@@ -117,7 +117,7 @@ class TransformChain {
     return this.chainTransform(this.chain, this.fromOrigin);
   }
 
-  // left matrices accumulation including matrix at index
+  // left matrices accumulation excluding matrix at index
   leftTransformInverse(index?: number): Matrix {
     const left =
       index === undefined || index < 0
@@ -133,11 +133,11 @@ class TransformChain {
 
   // right matrices accumulation excluding matrix at index
   rightTransform(index: number): Matrix {
-    return index >= this.chain.length - 1
+    return index >= this.chain.length
       ? this.chainTransform(this.chain, this.fromOrigin)
       : this.chainTransform(
-          this.chain.slice(0, index + 1),
-          this.fromOrigin.slice(0, index + 1)
+          this.chain.slice(0, index),
+          this.fromOrigin.slice(0, index)
         );
   }
 
