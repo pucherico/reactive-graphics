@@ -20,6 +20,7 @@ import {
   exhaustMap,
   mergeMap,
   distinctUntilChanged,
+  concatMap,
 } from "rxjs";
 import {
   valuesBetween,
@@ -33,6 +34,7 @@ import {
   quadraticPoints,
   bezierPoints,
   translationMatrix,
+  rotationMatrix,
 } from "./geom";
 import {
   GraphObject,
@@ -516,6 +518,27 @@ export class SpinEffect implements CanvasEffect {
   }
 }
 
+export const spinAnimation = (period: number = 1000) =>
+  (context: AnimationContext) => {
+    const origin = context.graphPointInContext(ORIGIN);
+    return context.frame$.pipe(
+      elapsedTime,
+      // deltaTime, // derivative/differential
+      mapTimeToRadians(period),
+      // map(radians => Identity
+      //   .translate(origin)
+      //   .rotate(radians)
+      //   .translate(vector(origin, ORIGIN))
+
+      map(radians => rotationMatrix(radians)),
+      // scan((acc, matrix) => matrix.multiply(acc)), // integration
+      map(m => translationMatrix(origin)
+                .multiply(m)
+                .translate(vector(origin, ORIGIN))
+      )
+    );
+  };
+
 export class BeatEffect implements CanvasEffect {
   constructor(
     private frame$: Observable<number>,
@@ -540,30 +563,28 @@ export class BeatEffect implements CanvasEffect {
   }
 }
 
-export const beatAnimation = (frame$: Observable<number>,
+export const beatAnimation = (
   deformCoef: number = 0.5,
   period: number = 1000 // ms (negative for anticlockwise spin)
-) => frame$.pipe(
+) => (context: AnimationContext) => context.frame$.pipe(
   elapsedTime,
-  map((time) => (2 * Math.PI * time) / period), // mapTimeToRadians(period)
+  mapTimeToRadians(period), // map((time) => (2 * Math.PI * time) / period),
   map((radians) => Math.sin(radians)),
   map(offset => deformCoef * offset),
   map((deform) => Identity.scale(1 + deform, 1 - deform))
 );
 
-/// Provisional. Mejorar cuando se cree AnimationContext
 export const oscillatorAnimation = (
-  frame$: Observable<number>, 
   amplitude: number, 
   horizontal: boolean = true,
   period: number = 1000 // ms (negative for anticlockwise spin)
-  ) => {
+  ) => (context: AnimationContext) => {
     const offsetToPoint: (offset: number) => Point = horizontal
       ? (offset) => ({ x: offset, y: 0 })
       : (offset) => ({ x: 0, y: offset });
-    return frame$.pipe(
+    return context.frame$.pipe(
       elapsedTime,
-      map((time) => (2 * Math.PI * time) / period), // mapTimeToRadians(period) | map(timeToRadians(period)) (apartado // Utils: functions and operators)
+      mapTimeToRadians(period),
       map((radians) => Math.sin(radians) * amplitude),
       map(offsetToPoint),
       // deltaPoint(), // derivative
@@ -615,7 +636,6 @@ export class FollowVectorsEffect implements CanvasEffect {
     );
   }
 }
-/// FollowPathEffect
 
 export class QuarterTurnEffect implements CanvasEffect {
   constructor(
@@ -736,25 +756,62 @@ export class MovementEffect implements CanvasEffect {
 }
 
 export const movementAnimation = (
-  context: AnimationContext,
   from: Point,
   to: Point,
   ms: number,
   ease: boolean = false
-) => context.frame$.pipe(
+) => (context: AnimationContext) => context.frame$.pipe(
   movement(from, to, ms, ease),
   map((point) => translationMatrix(point)),
 );
 
-export const followPathAnimation = (
-  context: AnimationContext,
-  path$: Observable<Point> = context.pointer.start$
-) => path$.pipe(
+export const movementAtSpeedAnimation = (
+  from: Point,
+  to: Point,
+  pixelsPerSecond: number,
+  ease: boolean = false
+) => (context: AnimationContext) => context.frame$.pipe(
+  movementAtSpeed(from, to, pixelsPerSecond, ease), // movementAtSpeed
+  map((point) => translationMatrix(point)),
+);
+
+export const followPathAnimation = (  
+  path$: Observable<Point>,
+  ms: number = 1000,
+  ease: boolean = false
+) => (context: AnimationContext) => path$.pipe(
   context.pointer.filterPointWithoutContact(),
   map((point) => context.devicePointInContext(point)),
+  map((point) => vector(context.graphPointInContext(ORIGIN), point)),
   scan((acc, point) => ({ origin: acc.dest, dest: point }), { origin: ORIGIN, dest: ORIGIN }),
-  switchMap(({ origin, dest }) => movementAnimation(context, origin, dest, 500, true))
+  switchMap(({ origin, dest }) => movementAnimation(origin, dest, ms, ease)(context))
 );
+
+export const followPathAtSpeedAnimation = (
+  path$: Observable<Point>,
+  pixelsPerSecond: number,
+  ease: boolean = false
+) => (context: AnimationContext) => path$.pipe(
+  context.pointer.filterPointWithoutContact(),
+  map((point) => context.devicePointInContext(point)),
+  map((point) => vector(context.graphPointInContext(ORIGIN), point)),
+  scan((acc, point) => ({ origin: acc.dest, dest: point }), { origin: ORIGIN, dest: ORIGIN }),
+  concatMap(({ origin, dest }) => movementAtSpeedAnimation(origin, dest, pixelsPerSecond, ease)(context))
+);
+
+export const followPointerAnimation = (
+  ms: number = 1000,
+  ease: boolean = false
+) => (context: AnimationContext) => followPathAnimation(
+  context.pointer.start$, ms, ease
+)(context);
+
+export const followPointerAtSpeedAnimation = (
+  pixelsPerSecond: number,
+  ease: boolean = false
+) => (context: AnimationContext) => followPathAtSpeedAnimation(
+  context.pointer.start$, pixelsPerSecond, ease
+)(context);
 
 // const attrContactIsNotNull = (x: { origin: Point, contact: Contact | null, point: Point }): x is { origin: Point, contact: Contact, point: Point } => x.contact !== null;
 // const attrContactIsNotNull = <T extends { contact: Contact | null }>(x: T): x is T & { contact: Contact } => x.contact !== null;
