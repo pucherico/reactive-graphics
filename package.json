@@ -9,11 +9,11 @@
   "module": "./dist/reactive-graphics.es.js",
   "exports": {
     ".": {
+      "types": "./dist-types/index.d.ts",
       "import": "./dist/reactive-graphics.es.js",
       "require": "./dist/reactive-graphics.umd.js"
     }
   },
-  "types": "dist-types/index.d.ts",
   "scripts": {
     "dev": "vite",
     "build": "tsc --declaration --declarationDir dist-types --emitDeclarationOnly && vite build",
