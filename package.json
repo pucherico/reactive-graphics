@@ -1,6 +1,6 @@
 {
   "name": "reactive-graphics",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "files": [
     "dist",
     "dist-types/**/*.d.ts"
