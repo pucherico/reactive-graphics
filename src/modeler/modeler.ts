@@ -1,4 +1,5 @@
-import { Drawable, Identity, Matrix, ORIGIN } from "..";
+import { Drawable } from "../render";
+import { Identity, Matrix, ORIGIN } from "../geom";
 import { PathBuilder } from "./path";
 
 interface PathModel<M> {

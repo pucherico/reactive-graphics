@@ -1,4 +1,4 @@
-import { Identity, Matrix, ORIGIN, Point, vector } from "..";
+import { Identity, Matrix, ORIGIN, Point, vector } from "../geom";
 import { ModelerContext } from "./modeler";
 
 const makeCoords = (...coords: number[]): Point[] => {

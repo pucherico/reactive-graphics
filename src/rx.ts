@@ -1,4 +1,4 @@
-import { Observable, interval, zip, every, map, concatMap, first, startWith, scan, skip } from 'rxjs';
+import { Observable, OperatorFunction, interval, zip, every, map, concatMap, first, startWith, scan, skip } from 'rxjs';
 // import { map, every, scan, skip, concatMap, first, startWith } from 'rxjs/operators';
 
 /// Mejorar este operador usando filter + isEmpty
@@ -34,5 +34,5 @@ export const differential = (relative = false) => (source: Observable<number>) =
   return relative ? diff.pipe(skip(1)) : diff;
 }
 
-export const integration = () => (source: Observable<number>) =>
+export const integration = () => (source: Observable<number>): Observable<number> =>
   source.pipe(scan((acc, delta) => acc + delta));
