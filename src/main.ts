@@ -12,17 +12,9 @@ app.innerHTML = `
 
 import {
   GraphEngine,
-  Identity,
-  Modeler,
-  PathBuilder,
-  TranslateLayerEffect,
 } from ".";
-import { wave } from "./demo/graphics";
 import { grid } from "./demo/sample-grid";
-import demoSymmetry from "./demo/sample-symmetry";
-import { SpinEffect } from "./fx";
 import sampleEffects from "./demo/sample-effects";
-import { of } from "rxjs";
 
 const canvas = document.querySelector("canvas");
 if (!canvas) throw new Error("canvas not found");

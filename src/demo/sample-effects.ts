@@ -1,33 +1,15 @@
 import { map, of, switchMap, tap } from "rxjs";
 import {
   beatAnimation,
-  bezierMovement,
-  bezierMovementAtSpeed,
   deltaPoint,
-  deltaTime,
-  followPathAnimation,
-  followPointerAnimation,
   followPointerAtSpeedAnimation,
-  FollowVectorsEffect,
-  movement,
-  movementAnimation,
   movementAtSpeed,
-  movementAtSpeedAnimation,
-  MovementEffect,
   oscillatorAnimation,
-  OscillatorEffect,
-  quadraticMovement,
   spinAnimation,
-  SpinEffect,
-  takeDuring,
-  unitsPerSecond,
-  velocity,
 } from "../fx";
 import {
-  Identity,
   ORIGIN,
   rotationMatrix,
-  scalingMatrix,
   translationMatrix,
   vector,
 } from "../geom";
@@ -35,13 +17,6 @@ import { Modeler } from "../modeler/modeler";
 import { createGraph, GraphEngine } from "../engine";
 import { mesa } from "./graphics";
 
-const vectors = [
-  // { x: 0, y: 0 },
-  { x: 200, y: 0 },
-  // { x: 0, y: 100 },
-  { x: -200, y: 0 },
-  // { x: 0, y: -100 },
-];
 export const scene2 = (engine: GraphEngine) => {
   const drawable = Modeler.new()
     .fillStyle("yellow")

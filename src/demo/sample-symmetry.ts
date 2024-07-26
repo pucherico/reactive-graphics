@@ -1,11 +1,9 @@
-import { of } from "rxjs";
 import {
   Drawable,
   GraphObject,
   Identity,
   Matrix,
   Modeler,
-  ORIGIN,
   PathBuilder,
   Point,
 } from "..";
