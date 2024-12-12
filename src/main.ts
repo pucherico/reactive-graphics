@@ -15,6 +15,7 @@ import {
 } from ".";
 import { grid } from "./demo/sample-grid";
 import sampleEffects from "./demo/sample-effects";
+import sampleSymmetry from "./demo/sample-symmetry"
 
 const canvas = document.querySelector("canvas");
 if (!canvas) throw new Error("canvas not found");
@@ -25,6 +26,7 @@ grid(engine);
 
 // scene2(engine);
 sampleEffects(engine);
+sampleSymmetry(engine)
 // demoSymmetry(engine); // graph object
 
 // engine.addGraphic(wave);
